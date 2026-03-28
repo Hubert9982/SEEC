@@ -170,3 +170,4 @@ mind*
 data/
 example/
 model_hub/*.pth
+experiments/

@@ -3,13 +3,11 @@ from PIL import Image
 import torch.nn.functional as F
 from torchvision import transforms
 import torchac
-from model.seec import SeecNet
 import pickle
-import os
 from utils.func import img2patch, check_state_dict, extract_mask, Timer, coding_table_3p
 from model_hub.models.birefnet import BiRefNet
 import imagecodecs
-
+import utils.builder as builder
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 patch_sz = 64
@@ -19,18 +17,19 @@ mix_num = 5
 mix_num2 = mix_num * 2
 samples = torch.arange(0, 256, dtype=torch.float32).to(device)
 samples = samples * norm_scale
+COT = coding_table_3p(patch_sz=patch_sz).to(device)
 
 
-def compress(model: SeecNet, birefnet: BiRefNet, input_path: str, COT, segtype: str = "norm"):
+def compress(args, img_path, birefnet: BiRefNet):
 
     x_stream = []
     results = {}
-
-    img = Image.open(input_path).convert("RGB")
+    model = args.model.to(device)
+    img = Image.open(img_path).convert("RGB")
 
     with Timer(results, "seg_extract_time"):
         torch.cuda.synchronize()
-        seg = extract_mask(birefnet, img, segtype)
+        seg = extract_mask(birefnet, img, args.segtype)
 
     with Timer(results, "compress_time"):
         hw = img.size[0] * img.size[1]
@@ -49,7 +48,7 @@ def compress(model: SeecNet, birefnet: BiRefNet, input_path: str, COT, segtype: 
             latent_code = model.seg_img_compressor.compress(x / 255.0)
             prior_total = model.seg_img_compressor.decompress(**latent_code)["prior"]
 
-            context_total = model.mask_conv(x * norm_scale)
+            context_total = model.sp_ctx(x * norm_scale)
             B = x.shape[0]
             max_step = torch.max(COT)
             for i in range(max_step):
@@ -61,7 +60,7 @@ def compress(model: SeecNet, birefnet: BiRefNet, input_path: str, COT, segtype: 
                 fusion_context = model.fusion(torch.cat([prior, context], dim=1))
                 lmm_params = model.ep(fusion_context, seg_crop)
                 mu, log_sigma, coeffs, weights = torch.split(lmm_params, 15, dim=1)
-                if model.no_multichannel_lmm:
+                if args.no_multichannel_lmm:
                     weights = weights.reshape(B, 1, mix_num, -1, 1)
                     weights = weights.repeat(1, 3, 1, 1, 1)
                 else:
@@ -117,7 +116,10 @@ def compress(model: SeecNet, birefnet: BiRefNet, input_path: str, COT, segtype: 
                         cdf = cdf[code_flag[:, :, h_idx, w_idx].squeeze(1).bool() == 1]
                         symbol = symbol[code_flag[:, :, h_idx, w_idx].squeeze(1).bool() == 1]
                     stream = torchac.encode_float_cdf(
-                        cdf.cpu(), symbol.cpu(), needs_normalization=False, check_input_bounds=False
+                        cdf.cpu(),
+                        symbol.cpu(),
+                        needs_normalization=False,
+                        check_input_bounds=False,
                     )
                     x_stream.append(stream)
 
@@ -127,8 +129,9 @@ def compress(model: SeecNet, birefnet: BiRefNet, input_path: str, COT, segtype: 
         seg_bin = imagecodecs.jpegxl_encode(transforms.ToPILImage()(seg.squeeze(0).cpu().byte()))
         torch.cuda.synchronize()
 
-    y_len = sum(len(latent_code["strings"][0][i]) for i in range(len(latent_code["strings"][0])))
-    z_len = sum(len(latent_code["strings"][1][i]) for i in range(len(latent_code["strings"][1])))
+    latent_len = sum(len(latent_code["strings"][i][0]) for i in range(len(latent_code["strings"])))
+    z_len = len(latent_code["strings"][-1][0])
+    y_len = latent_len - z_len
 
     x_len = sum([len(x_stream[i]) for i in range(len(x_stream))])
 
@@ -136,10 +139,10 @@ def compress(model: SeecNet, birefnet: BiRefNet, input_path: str, COT, segtype: 
     results["y_bpp"] = y_len * 8 / hw
     results["x_bpp"] = x_len * 8 / hw
     results["seg_bpp"] = len(seg_bin) * 8 / hw
-    results["lantent_bpp"] = (y_len + z_len) * 8 / hw
+    results["latent_bpp"] = latent_len * 8 / hw 
 
     results["bpp"] = (
-        results["lantent_bpp"] + results["x_bpp"] + results["seg_bpp"] + 6 * 2 * 8 / hw
+        results["latent_bpp"] + results["x_bpp"] + results["seg_bpp"] + 6 * 2 * 8 / hw
     )  # lantent stream + x stream + z_shape + x_shape
     results["enc_time"] = results["compress_time"] + results["seg_extract_time"] + results["seg_enc_time"]
 
@@ -153,6 +156,7 @@ def config_parser():
     parser.add_argument(
         "--ckpt",
         type=str,
+        default="experiments/run-20251110-010902/checkpoints/best_model.pt",
         help="Path to the model checkpoint",
     )
 
@@ -162,7 +166,9 @@ def config_parser():
         default="model_hub/BiRefNet-general-epoch_244.pth",
         help="Path to the BiRefNet checkpoint",
     )
-    parser.add_argument("--input", "--i", type=str, help="Directory containing images to encode")
+    parser.add_argument(
+        "--input", "--i", type=str, default="./example/kodim19.png", help="Directory containing images to encode"
+    )
     parser.add_argument("--output", "--o", type=str, default="tmp/temp", help="Output path to save the results")
 
     parser.add_argument(
@@ -172,30 +178,40 @@ def config_parser():
         default="norm",
         help="Mask type for segmentation",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to the config file.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = config_parser()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.config:
+        config = builder.load_config(args.config)
+    else:
+        config = builder.load_config(builder.ckpt2config(args.ckpt))
+    args = builder.merge_config_args(config, args)
     torch.set_grad_enabled(False)
+
     birefnet = BiRefNet(bb_pretrained=False)
     state_dict = torch.load(args.birefnet_ckpt, map_location="cpu")
     state_dict = check_state_dict(state_dict)
     birefnet.load_state_dict(state_dict)
     birefnet.to(device)
     birefnet.eval()
+
     birefnet.half()
 
-    model = SeecNet.from_state_dict(torch.load(args.ckpt)["model"]).to(device)
+    args.model.load_state_dict(torch.load(args.ckpt)["model"])
 
-    model.seg_img_compressor.update(force=True)
-    COT = coding_table_3p(patch_sz=64).to(device)
+    args.model.seg_img_compressor.update(force=True)
 
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
+    # if not os.path.exists(args.output):
+    #     os.makedirs(args.output)
 
-    latent_code, x_stream, seg_bin, img_shape, results = compress(model, birefnet, args.input, COT, args.segtype)
+    latent_code, x_stream, seg_bin, img_shape, results = compress(args, args.input, birefnet)
     print("Results:", results)
     print("Compression completed. Results saved to:", args.output)
     with open(args.output, "wb") as f:

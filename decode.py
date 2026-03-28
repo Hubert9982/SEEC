@@ -7,7 +7,7 @@ import pickle
 from utils.func import img2patch, patch2img, coding_table_3p, Timer
 import imagecodecs
 import torchvision.transforms.functional as TF
-
+import utils.builder as builder
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 patch_sz = 64
@@ -17,12 +17,14 @@ mix_num = 5
 mix_num2 = mix_num * 2
 samples = torch.arange(0, 256, dtype=torch.float32).to(device)
 samples = samples * norm_scale
+COT = coding_table_3p(patch_sz=patch_sz).to(device)
 
 
-def decompress(model: SeecNet, latent_code, x_stream, img_shape, seg_bin, COT):
+def decompress(args, latent_code, x_stream, img_shape, seg_bin):
 
     results = {}
     is_padding = img_shape[0] % patch_sz != 0 or img_shape[1] % patch_sz != 0
+    model = args.model.to(device)
     with Timer(results, "seg_dec_time"):
         torch.cuda.synchronize()
         seg = imagecodecs.jpegxl_decode(seg_bin)
@@ -42,14 +44,14 @@ def decompress(model: SeecNet, latent_code, x_stream, img_shape, seg_bin, COT):
             j = 0
             for i in range(max_step):
                 h_idx, w_idx = torch.nonzero(COT == i + 1, as_tuple=True)
-                context = model.mask_conv(x_tmp * norm_scale)[:, :, h_idx, w_idx].unsqueeze(3)
+                context = model.sp_ctx(x_tmp * norm_scale)[:, :, h_idx, w_idx].unsqueeze(3)
                 prior = prior_total[:, :, h_idx, w_idx].unsqueeze(3)
                 x_crop = x_tmp[:, :, h_idx, w_idx].unsqueeze(3)
                 seg_crop = seg[:, :, h_idx, w_idx].unsqueeze(3)
                 fusion_context = model.fusion(torch.cat([prior, context], dim=1))
                 lmm_params = model.ep(fusion_context, seg_crop)
                 mu, log_sigma, coeffs, weights = torch.split(lmm_params, 15, dim=1)
-                if model.no_multichannel_lmm:
+                if args.no_multichannel_lmm:
                     weights = weights.reshape(weights.shape[0], 1, mix_num, -1, 1)
                     weights = weights.repeat(1, 3, 1, 1, 1)
                 else:
@@ -126,6 +128,7 @@ def config_parser():
     parser.add_argument(
         "--ckpt",
         type=str,
+        default="experiments/run-20251110-010902/checkpoints/best_model.pt",
         help="Path to the model checkpoint",
     )
 
@@ -145,29 +148,34 @@ def config_parser():
         default="norm",
         help="Mask type for segmentation",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to the config file.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = config_parser()
-    input_path = args.input
+    if args.config:
+        config = builder.load_config(args.config)
+    else:
+        config = builder.load_config(builder.ckpt2config(args.ckpt))
+    args = builder.merge_config_args(config, args)
+    torch.set_grad_enabled(False)
 
-    ckpt_path = args.ckpt
-    out_path = args.output
-    with open(input_path, "rb") as f:
+    with open(args.input, "rb") as f:
         latent_code, seg_bin, x_stream, img_shape = pickle.load(f)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = SeecNet.from_state_dict(torch.load(ckpt_path)["model"])
-    model.to(device)
-    COT = coding_table_3p(patch_sz=64).to(device)
+    args.model.load_state_dict(torch.load(args.ckpt)["model"])
+    args.model.seg_img_compressor.update(force=True)
 
-    model.seg_img_compressor.update(force=True)
-
-    img, results = decompress(model, latent_code, x_stream, img_shape, seg_bin, COT)
+    img, results = decompress(args, latent_code, x_stream, img_shape, seg_bin)
     print("Decompression results:", results)
     img = TF.to_pil_image(img.byte())
-    img.save(out_path)
+    img.save(args.output)
 
 
 if __name__ == "__main__":

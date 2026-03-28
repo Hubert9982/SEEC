@@ -1,13 +1,15 @@
 import torch
 from PIL import Image
 from torchvision import transforms
-from model.seec import SeecNet, SeecLoss
+from model.loss import BPPLoss
 import os
 from model_hub.models.birefnet import BiRefNet
 from encode import compress
 from decode import decompress
 from utils.func import get_md5, AverageMeter, check_state_dict
-from utils.func import img2patch, extract_mask, coding_table_3p
+from utils.func import img2patch, extract_mask
+import utils.builder as builder
+from tqdm import tqdm
 
 
 def config_parser():
@@ -19,7 +21,11 @@ def config_parser():
         type=str,
         help="Path to the model checkpoint",
     )
-
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to the config file.",
+    )
     parser.add_argument(
         "--birefnet_ckpt",
         type=str,
@@ -42,6 +48,12 @@ def config_parser():
 
 def main():
     args = config_parser()
+    if args.config:
+        config = builder.load_config(args.config)
+    else:
+        config = builder.load_config(builder.ckpt2config(args.ckpt))
+    args = builder.merge_config_args(config, args)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.set_grad_enabled(False)
     birefnet = BiRefNet(bb_pretrained=False)
@@ -52,11 +64,13 @@ def main():
     birefnet.eval()
     birefnet.half()
 
-    model = SeecNet.from_state_dict(torch.load(args.ckpt)["model"]).to(device)
+    model = args.model
+
+    model.load_state_dict(torch.load(args.ckpt)["model"])
+    model.to(device)
 
     model.seg_img_compressor.update(force=True)
     model.eval()
-    COT = coding_table_3p(patch_sz=64).to(device)
 
     if not os.path.exists(args.cache_dir):
         os.makedirs(args.cache_dir)
@@ -73,18 +87,23 @@ def main():
             bpp = AverageMeter()
             enc_time = AverageMeter()
             dec_time = AverageMeter()
+            x_bpp = AverageMeter()
+            y_bpp = AverageMeter()
+            z_bpp = AverageMeter()
+            seg_bpp = AverageMeter()
+            seg_enc_time = AverageMeter()
+            seg_extract_time = AverageMeter()
 
-            for path in os.listdir(imgdir):
+            for path in tqdm(os.listdir(imgdir), desc=f"Processing images in {imgdir}"):
+
                 img_path = os.path.join(imgdir, path)
 
                 cache_key = get_md5(args.ckpt, img_path, args.segtype)
-                if cache_key in os.listdir(args.cache_dir):
+                try:
                     enc_results, dec_results = torch.load(os.path.join(args.cache_dir, cache_key))
-                else:
-                    latent_code, x_stream, seg_bin, img_shape, enc_results = compress(
-                        model, birefnet, img_path, COT=COT, segtype=args.segtype
-                    )
-                    img, dec_results = decompress(model, latent_code, x_stream, img_shape, seg_bin, COT)
+                except:
+                    latent_code, x_stream, seg_bin, img_shape, enc_results = compress(args, img_path, birefnet)
+                    img, dec_results = decompress(args, latent_code, x_stream, img_shape, seg_bin)
                     original_img = Image.open(img_path).convert("RGB")
                     original_img = transforms.PILToTensor()(original_img)
                     # assert torch.all(img == original_img), "Decoded image does not match the original image"
@@ -92,13 +111,26 @@ def main():
                 bpp.update(enc_results["bpp"])
                 enc_time.update(enc_results["enc_time"])
                 dec_time.update(dec_results["dec_time"])
+                x_bpp.update(enc_results["x_bpp"])
+                y_bpp.update(enc_results["y_bpp"])
+                z_bpp.update(enc_results["z_bpp"])
+                seg_bpp.update(enc_results["seg_bpp"])
+                seg_enc_time.update(enc_results["seg_enc_time"])
+                seg_extract_time.update(enc_results.get("seg_extract_time", 0.0))
 
             print(f"Results for {imgdir}:")
             print(f"Average BPP: {bpp.avg:.2f}")
             print(f"Average Encoding Time: {enc_time.avg:.2f} seconds")
             print(f"Average Decoding Time: {dec_time.avg:.2f} seconds")
+            print(f"Average X BPP: {x_bpp.avg:.4f}")
+            print(f"Average Y BPP: {y_bpp.avg:.4f}")
+            print(f"Average Z BPP: {z_bpp.avg:.4f}")
+            print(f"Average Segmentation BPP: {seg_bpp.avg:.4f}")
+            print(f"Average Segmentation Extraction Time: {seg_extract_time.avg:.2f} seconds")
+            print(f"Average Segmentation Encoding Time: {seg_enc_time.avg:.2f} seconds")
+
     else:
-        criterion = SeecLoss()
+        criterion = BPPLoss()
         for imgdir in args.imgdir:
             Nll = AverageMeter()
             X_bpp = AverageMeter()

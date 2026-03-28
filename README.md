@@ -29,14 +29,10 @@ python prepare_data.py --div_path_train DIV2K_TRAIN_PATH --div_path_val DIV2K_VA
 ```
 ### pre-trained models
 
-We provide pre-trained models for various configurations, you can download from [PKU Disk](https://disk.pku.edu.cn/link/AAA236AE0BC42E4C8194AAAA96E9C290A1), [BaiDu NetDisk](https://pan.baidu.com/s/1CVc8pYoEkq1YKaMI0Mda8w?pwd=4nig), or [Google Drive](https://drive.google.com/drive/folders/1aylQL552EDCwdV6p1qD85KTwM97SH47l?usp=sharing).
-| MEM (multi entrop model) | MCDLM (multi-channel lmm) | epoch |  md5 |  
-|--------------------------|---------------------------|-------|---|
-| ✔                        | ✔                         | 1500  |  9a3aedf9c7ae081c3477029db9519443 |  
-| ✔                      | ✔                            | 600   |   e2d548cca0f7efa59ec94085d819a22b|  
-| ✘                       | ✔                         | 600   |  3343a3e4f148ae232e32362ab841dcc7 |   
-| ✔                        | ✘                        | 600   | 3b993700fb93d4117e5809fb6d7a3f6f  | 
-| ✘                        | ✘                         | 600   |  e5e244b9e9868b804f707817be5f6053 |
+We provide main models and (ablation models will be available soon). you can download from [PKU Disk](https://disk.pku.edu.cn/link/AA4BF8AE4F3C7D4BE8BBB5EED6C631E38F), [BaiDu NetDisk](https://pan.baidu.com/s/1Maw-VUQe6zPW2O-icmGBSA?pwd=2xcv), or [Google Drive](https://drive.google.com/drive/folders/1eFrNdaTtpadxKUTZ-i_5Pr1ZM_e9pC24?usp=drive_link)
+
+
+
 
 Besides, you also need to download the pre-trained segmentation model from [BiRefNet](https://github.com/ZhengPeng7/BiRefNet), we use the [BiRefNet-general-epoch_244.pth](https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/BiRefNet-general-epoch_244.pth) and place it in the `model_hub` directory.
 
@@ -45,33 +41,30 @@ Besides, you also need to download the pre-trained segmentation model from [BiRe
 ### Training from scratch
 Example script for training the model from scratch, it takes about 5 days on a single NVIDIA A100 GPU:
 ```
-python train.py \
--- batch_size 64 \
--- num_epochs 1500 \
--- lr 0.0001 \
--- aux_lr 0.001 \
--- train_path ./data/DIV2K_train_p128 \
--- val_path ./data/DIV2K_valid_p128 \
--- num_ch 192 \
--- prior_ch 256 \
--- context_ch 256 \
--- ep_ch 256 \
--- num_mix 5 \
+python train.py --config seg_T_mul_T_part4_full.py
 ```
-use `--no_seg` to disable segmentation and `--no_multichannel_lmm` to disable multi-channel LMM.
+use different config files for training different models to disable segmentation or multi-channel LMM., the config files are in the `configs` directory.
+
+| MEM (multi entropy model) | MCDLM (multi-channel lmm) | epoch |  config |  
+|--------------------------|---------------------------|-------|---|
+| ✔                        | ✔                         | 1500  |  seg_T_mul_T_part4_full.py |  
+| ✔                      | ✔                            | 600   |   seg_T_mul_T_part4.py|  
+| ✘                       | ✔                         | 600   |  seg_F_mul_T_part4.py |   
+| ✔                        | ✘                        | 600   | seg_T_mul_F_part4.py  | 
+| ✘                        | ✘                         | 600   |  seg_F_mul_F_part4.py |
 
 ### Evaluation
 Given a model checkpoint, you can evaluate the negative log-likelihood (NLL) by dry-run:
 ```
-python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY --dryrun
+python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY --dryrun --config CONFIG_FILE
 ```
 or evaluate the actual bpp and runtime of compressing and decompressing the images:
 ```
-python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY
+python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY --config CONFIG_FILE
 ```
 You can evaluate on multiple directories by specifying `--imgdir` multiple times:
 ```
-python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY_1 PATH_TO_IMAGE_DIRECTORY_2
+python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY_1 PATH_TO_IMAGE_DIRECTORY_2 --config CONFIG_FILE
 ```
 ## Citation
 If you find our work useful in your research, please consider citing the following paper:

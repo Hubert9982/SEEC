@@ -11,7 +11,7 @@ from utils.func import check_state_dict, extract_mask, check_path
 def parse_args():
     parser = argparse.ArgumentParser(description="Prepare data for BiRefNet")
     parser.add_argument(
-        "--birefnet_ckpt",
+        "--seg_ckpt",
         type=str,
         default="model_hub/BiRefNet-general-epoch_244.pth",
         help="Path to the BiRefNet checkpoint",
@@ -29,7 +29,7 @@ def parse_args():
 
 args = parse_args()
 
-PATH_TO_WEIGHT = args.birefnet_ckpt
+PATH_TO_WEIGHT = args.seg_ckpt
 
 birefnet = BiRefNet(bb_pretrained=False)
 state_dict = torch.load(PATH_TO_WEIGHT, map_location="cpu")
@@ -82,4 +82,4 @@ for path in paths:
                         compress_level=0,
                     )
                     counter += 1
-print("Total patches:", counter - 1)
+        print("Total patches:", counter - 1)
