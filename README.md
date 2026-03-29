@@ -5,7 +5,11 @@ This repo is the official implementation of the paper ["SEEC: Segmentation-Assis
   <img src="assets/pipeline.png" />
 </div>
 
+<br>
 
+<div align="center">
+  <img src="assets/result.png" />
+</div>
 
 ## Preparation
 
@@ -66,6 +70,15 @@ You can evaluate on multiple directories by specifying `--imgdir` multiple times
 ```
 python eval.py --ckpt PATH_TO_CHECKPOINT --imgdir PATH_TO_IMAGE_DIRECTORY_1 PATH_TO_IMAGE_DIRECTORY_2 --config CONFIG_FILE
 ```
+
+Encoding and decoding a single image separately can be done by:
+```
+python encode.py --ckpt PATH_TO_CHECKPOINT --i PATH_TO_IMAGE --o PATH_TO_OUTPUT_BITSTREAM --config CONFIG_FILE
+python decode.py --ckpt PATH_TO_CHECKPOINT --i PATH_TO_INPUT_BITSTREAM --o PATH_TO_OUTPUT_IMAGE --config CONFIG_FILE
+```
+
+
+
 ## Citation
 If you find our work useful in your research, please consider citing the following paper:
 ```
