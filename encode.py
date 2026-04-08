@@ -139,7 +139,7 @@ def compress(args, img_path, birefnet: BiRefNet):
     results["y_bpp"] = y_len * 8 / hw
     results["x_bpp"] = x_len * 8 / hw
     results["seg_bpp"] = len(seg_bin) * 8 / hw
-    results["latent_bpp"] = latent_len * 8 / hw 
+    results["latent_bpp"] = latent_len * 8 / hw
 
     results["bpp"] = (
         results["latent_bpp"] + results["x_bpp"] + results["seg_bpp"] + 6 * 2 * 8 / hw
@@ -212,6 +212,11 @@ def main():
     #     os.makedirs(args.output)
 
     latent_code, x_stream, seg_bin, img_shape, results = compress(args, args.input, birefnet)
+
+    # fix bug from https://github.com/chunbaobao/SEEC/issues/3
+    # remove the y_hat in latent_code
+    del latent_code["y_hat"]
+
     print("Results:", results)
     print("Compression completed. Results saved to:", args.output)
     with open(args.output, "wb") as f:
