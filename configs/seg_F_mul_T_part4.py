@@ -174,6 +174,7 @@ model = SeecNet(
     fusion=fusion,
     distribution=distribution,
 )
+model.uses_segmentation = False
 
 
 if multistep:

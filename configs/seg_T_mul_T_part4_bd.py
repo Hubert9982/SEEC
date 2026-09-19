@@ -32,11 +32,15 @@ from compressai.latent_codecs import HyperpriorLatentCodec
 from compressai.layers import sequential_channel_ramp, CheckerboardMaskedConv2d, conv1x1
 
 
-num_epochs = 1500
+num_epochs = 1000
 multistep = False
 
 #  parameters
 patch_sz = 64  # B * 3 * 64 * 64
+upper_bound_mode = "bitdepth"
+upper_bound_bits = 2
+lower_bound_mode = "none"
+lower_bound_bits = 0
 
 
 # Model parameters

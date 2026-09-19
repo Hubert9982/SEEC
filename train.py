@@ -176,18 +176,24 @@ def train(args):
             else:
                 scheduler.step()
 
-            dist.save_on_master(
-                {
-                    "epoch": epoch,
-                    "model": model_without_ddp.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "aux_optimizer_state_dict": aux_optimizer.state_dict(),
-                    "scheduler": scheduler.state_dict(),
-                    "step": train_step,
-                    "best_bpp": best_bpp,
-                },
-                os.path.join(ckpt_dir, "model.pt"),
-            )
+            checkpoint = {
+                "epoch": epoch,
+                "model": model_without_ddp.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "aux_optimizer_state_dict": aux_optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "step": train_step,
+                "best_bpp": best_bpp,
+            }
+            dist.save_on_master(checkpoint, os.path.join(ckpt_dir, "model.pt"))
+
+            for checkpoint_epoch in getattr(args, "checkpoint_epochs", []):
+                if epoch + 1 != checkpoint_epoch:
+                    continue
+                checkpoint_path = os.path.join(ckpt_dir, f"epoch_{checkpoint_epoch}.pt")
+                if dist.is_main_process() and not os.path.exists(checkpoint_path):
+                    torch.save(checkpoint, checkpoint_path)
+                    print(f"Saved persistent checkpoint: {checkpoint_path}")
             if val_loss < best_bpp:
 
                 dist.save_on_master(

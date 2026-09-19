@@ -10,6 +10,8 @@ from torchvision import transforms
 import imagecodecs
 
 from model.bitdepth_codec import compress_patches
+from model.bounds_codec import compress_patches as compress_bounds_patches
+from model.range_codec import compress_patches as compress_range_patches
 from utils.func import img2patch, check_state_dict, extract_mask, Timer, coding_table_3p
 import utils.builder as builder
 
@@ -39,7 +41,8 @@ def compress(args, img_path, birefnet):
         results["seg_extract_time"] = 0.0
         seg = torch.zeros((1, img.size[1], img.size[0]), dtype=torch.uint8)
 
-    timer_context = nullcontext() if getattr(model, "is_bit_depth_model", False) else Timer(results, "compress_time")
+    uses_bound_codec = getattr(model, "is_bit_depth_model", False) or getattr(model, "is_range_model", False)
+    timer_context = nullcontext() if uses_bound_codec else Timer(results, "compress_time")
     with timer_context:
         hw = img.size[0] * img.size[1]
 
@@ -49,6 +52,66 @@ def compress(args, img_path, birefnet):
         x = img2patch(img, patch_sz=patch_sz).to(device)
         seg_patch = img2patch(seg, patch_sz=patch_sz).to(device)
         code_flag = img2patch(torch.ones_like(seg), patch_sz=patch_sz).to(device) if is_padding else None
+        if getattr(model, "is_range_model", False):
+            codec_start = time.time()
+            with torch.no_grad():
+                model.eval()
+                latent_code, x_stream, upper_code, lower_code, bound_bin = compress_range_patches(
+                    model, x, seg_patch, code_flag, patch_sz
+                )
+            results["compress_time"] = time.time() - codec_start
+            if getattr(model, "uses_segmentation", True):
+                with Timer(results, "seg_enc_time"):
+                    seg_bin = imagecodecs.jpegxl_encode(transforms.ToPILImage()(seg.squeeze(0).cpu().byte()))
+            else:
+                results["seg_enc_time"] = 0.0
+                seg_bin = b""
+            latent_len = sum(len(latent_code["strings"][i][0]) for i in range(len(latent_code["strings"])))
+            z_len = len(latent_code["strings"][-1][0])
+            x_len = sum(len(stream) for stream in x_stream)
+            results["z_bpp"] = z_len * 8 / hw
+            results["y_bpp"] = (latent_len - z_len) * 8 / hw
+            results["latent_bpp"] = latent_len * 8 / hw
+            results["x_bpp"] = x_len * 8 / hw
+            results["seg_bpp"] = len(seg_bin) * 8 / hw
+            results["bounds_bpp"] = len(bound_bin) * 8 / hw
+            results["bpp"] = (
+                results["latent_bpp"] + results["x_bpp"] + results["seg_bpp"]
+                + results["bounds_bpp"] + 6 * 2 * 8 / hw
+            )
+            results["enc_time"] = results["compress_time"] + results["seg_extract_time"] + results["seg_enc_time"]
+            return latent_code, x_stream, seg_bin, img_shape, results, bound_bin
+        if getattr(model, "is_bounds_model", False):
+            codec_start = time.time()
+            with torch.no_grad():
+                model.eval()
+                latent_code, x_stream, bit_depth, lower_code, bit_depth_bin, lower_bound_bin = compress_bounds_patches(
+                    model, x, seg_patch, code_flag, patch_sz
+                )
+            results["compress_time"] = time.time() - codec_start
+            if getattr(model, "uses_segmentation", True):
+                with Timer(results, "seg_enc_time"):
+                    seg_bin = imagecodecs.jpegxl_encode(transforms.ToPILImage()(seg.squeeze(0).cpu().byte()))
+            else:
+                results["seg_enc_time"] = 0.0
+                seg_bin = b""
+            latent_len = sum(len(latent_code["strings"][i][0]) for i in range(len(latent_code["strings"])))
+            z_len = len(latent_code["strings"][-1][0])
+            x_len = sum(len(stream) for stream in x_stream)
+            results["z_bpp"] = z_len * 8 / hw
+            results["y_bpp"] = (latent_len - z_len) * 8 / hw
+            results["latent_bpp"] = latent_len * 8 / hw
+            results["x_bpp"] = x_len * 8 / hw
+            results["seg_bpp"] = len(seg_bin) * 8 / hw
+            results["bit_depth_bpp"] = len(bit_depth_bin) * 8 / hw
+            results["lower_bound_bpp"] = len(lower_bound_bin) * 8 / hw
+            results["bounds_bpp"] = results["bit_depth_bpp"] + results["lower_bound_bpp"]
+            results["bpp"] = (
+                results["latent_bpp"] + results["x_bpp"] + results["seg_bpp"]
+                + results["bounds_bpp"] + 6 * 2 * 8 / hw
+            )
+            results["enc_time"] = results["compress_time"] + results["seg_extract_time"] + results["seg_enc_time"]
+            return latent_code, x_stream, seg_bin, img_shape, results, bit_depth_bin, lower_bound_bin
         if getattr(model, "is_bit_depth_model", False):
             codec_start = time.time()
             with torch.no_grad():
@@ -242,7 +305,7 @@ def main():
     torch.set_grad_enabled(False)
 
     birefnet = None
-    if getattr(args.model, "uses_segmentation", True):
+    if getattr(args.model, "uses_segmentation", True) and args.segtype != "random":
         from model_hub.models.birefnet import BiRefNet
 
         birefnet = BiRefNet(bb_pretrained=False)
@@ -261,7 +324,11 @@ def main():
     #     os.makedirs(args.output)
 
     compressed = compress(args, args.input, birefnet)
-    if getattr(args.model, "is_bit_depth_model", False):
+    if getattr(args.model, "is_range_model", False):
+        latent_code, x_stream, seg_bin, img_shape, results, bound_bin = compressed
+    elif getattr(args.model, "is_bounds_model", False):
+        latent_code, x_stream, seg_bin, img_shape, results, bit_depth_bin, lower_bound_bin = compressed
+    elif getattr(args.model, "is_bit_depth_model", False):
         latent_code, x_stream, seg_bin, img_shape, results, bit_depth_bin = compressed
     else:
         latent_code, x_stream, seg_bin, img_shape, results = compressed
@@ -273,7 +340,11 @@ def main():
     print("Results:", results)
     print("Compression completed. Results saved to:", args.output)
     with open(args.output, "wb") as f:
-        if getattr(args.model, "is_bit_depth_model", False):
+        if getattr(args.model, "is_range_model", False):
+            pickle.dump((latent_code, seg_bin, x_stream, img_shape, bound_bin), f)
+        elif getattr(args.model, "is_bounds_model", False):
+            pickle.dump((latent_code, seg_bin, x_stream, img_shape, bit_depth_bin, lower_bound_bin), f)
+        elif getattr(args.model, "is_bit_depth_model", False):
             pickle.dump((latent_code, seg_bin, x_stream, img_shape, bit_depth_bin), f)
         else:
             pickle.dump((latent_code, seg_bin, x_stream, img_shape), f)

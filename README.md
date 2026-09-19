@@ -51,11 +51,11 @@ use different config files for training different models to disable segmentation
 
 | MEM (multi entropy model) | MCDLM (multi-channel lmm) | epoch |  config |  
 |--------------------------|---------------------------|-------|---|
-| ✔                        | ✔                         | 1500  |  seg_T_mul_T_part4_full.py |  
-| ✔                      | ✔                            | 600   |   seg_T_mul_T_part4.py|  
-| ✘                       | ✔                         | 600   |  seg_F_mul_T_part4.py |   
-| ✔                        | ✘                        | 600   | seg_T_mul_F_part4.py  | 
-| ✘                        | ✘                         | 600   |  seg_F_mul_F_part4.py |
+| ✔                        | ✔                         | 1000  |  seg_T_mul_T_part4_full.py |
+| ✔                      | ✔                            | 1000  |   seg_T_mul_T_part4.py|
+| ✘                       | ✔                         | 1000  |  seg_F_mul_T_part4.py |
+| ✔                        | ✘                        | 1000  | seg_T_mul_F_part4.py  |
+| ✘                        | ✘                         | 1000  |  seg_F_mul_F_part4.py |
 
 ### Evaluation
 Given a model checkpoint, you can evaluate the negative log-likelihood (NLL) by dry-run:

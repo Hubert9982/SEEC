@@ -16,7 +16,9 @@ lr = 0.0001
 aux_lr = 0.001
 # blr = 0.0001
 # aux_blr = 0.001
-num_epochs = 600
+num_epochs = 1000
+# Preserve full checkpoints at these completed epochs in addition to model.pt.
+checkpoint_epochs = [600]
 lr_reduce_patience = 30
 lr_reduce_factor = 0.9
 multistep = False

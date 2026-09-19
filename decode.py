@@ -8,6 +8,9 @@ import imagecodecs
 import torchvision.transforms.functional as TF
 
 from model.bitdepth_codec import decompress_patches, unpack_bit_depth
+from model.bounds_codec import decompress_patches as decompress_bounds_patches
+from model.range_codec import decompress_patches as decompress_range_patches
+from model.bit_depth import unpack_lower_bound, unpack_range_bounds
 from model.seec import SeecNet
 import utils.builder as builder
 from utils.func import Timer, coding_table_3p, img2patch, patch2img
@@ -23,7 +26,7 @@ samples = samples * norm_scale
 COT = coding_table_3p(patch_sz=patch_sz).to(device)
 
 
-def decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin=None):
+def decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin=None, lower_bound_bin=None):
 
     results = {}
     is_padding = img_shape[0] % patch_sz != 0 or img_shape[1] % patch_sz != 0
@@ -36,6 +39,62 @@ def decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin=No
     else:
         results["seg_dec_time"] = 0.0
         seg = torch.zeros((1, img_shape[0], img_shape[1]), dtype=torch.int64, device=device)
+
+    if getattr(model, "is_range_model", False):
+        height = (img_shape[0] + patch_sz - 1) // patch_sz
+        width = (img_shape[1] + patch_sz - 1) // patch_sz
+        patch_count = height * width
+        if bit_depth_bin is None:
+            raise ValueError("range side information is required by the range model")
+        upper_code, lower_code = unpack_range_bounds(
+            bit_depth_bin,
+            patch_count,
+            model.upper_bound_bits,
+            model.lower_bound_bits,
+        )
+        seg_patch = img2patch(seg, patch_sz=patch_sz)
+        code_flag = None
+        if is_padding:
+            code_flag = img2patch(torch.ones_like(seg), patch_sz=patch_sz)
+        with Timer(results, "decompress_time"):
+            with torch.no_grad():
+                model.eval()
+                x_tmp, _ = decompress_range_patches(
+                    model, latent_code, x_stream, upper_code, lower_code,
+                    seg_patch, code_flag, patch_sz
+                )
+        x = patch2img(x_tmp, img_shape).clamp(0, 255)
+        results["bounds_bpp"] = len(bit_depth_bin) * 8 / (img_shape[0] * img_shape[1])
+        results["dec_time"] = results["decompress_time"] + results["seg_dec_time"]
+        return x[0].cpu(), results
+
+    if getattr(model, "is_bounds_model", False):
+        height = (img_shape[0] + patch_sz - 1) // patch_sz
+        width = (img_shape[1] + patch_sz - 1) // patch_sz
+        patch_count = height * width
+        if bit_depth_bin is None:
+            raise ValueError("bit-depth side information is required by the bounds model")
+        if lower_bound_bin is None:
+            raise ValueError("lower-bound side information is required by the bounds model")
+        bit_depth = unpack_bit_depth(bit_depth_bin, patch_count, model.start_bit)
+        lower_code = unpack_lower_bound(lower_bound_bin, patch_count)
+        seg_patch = img2patch(seg, patch_sz=patch_sz)
+        code_flag = None
+        if img_shape[0] % patch_sz != 0 or img_shape[1] % patch_sz != 0:
+            code_flag = img2patch(torch.ones_like(seg), patch_sz=patch_sz)
+        with Timer(results, "decompress_time"):
+            with torch.no_grad():
+                model.eval()
+                x_tmp, _ = decompress_bounds_patches(
+                    model, latent_code, x_stream, bit_depth, lower_code,
+                    seg_patch, img_shape, code_flag, patch_sz
+                )
+        x = patch2img(x_tmp, img_shape).clamp(0, 255)
+        results["bit_depth_bpp"] = len(bit_depth_bin) * 8 / (img_shape[0] * img_shape[1])
+        results["lower_bound_bpp"] = len(lower_bound_bin) * 8 / (img_shape[0] * img_shape[1])
+        results["bounds_bpp"] = results["bit_depth_bpp"] + results["lower_bound_bpp"]
+        results["dec_time"] = results["decompress_time"] + results["seg_dec_time"]
+        return x[0].cpu(), results
 
     if getattr(model, "is_bit_depth_model", False):
         height = (img_shape[0] + patch_sz - 1) // patch_sz
@@ -203,7 +262,10 @@ def main():
 
     with open(args.input, "rb") as f:
         payload = pickle.load(f)
-    if len(payload) == 5:
+    lower_bound_bin = None
+    if len(payload) == 6:
+        latent_code, seg_bin, x_stream, img_shape, bit_depth_bin, lower_bound_bin = payload
+    elif len(payload) == 5:
         latent_code, seg_bin, x_stream, img_shape, bit_depth_bin = payload
     else:
         latent_code, seg_bin, x_stream, img_shape = payload
@@ -213,7 +275,7 @@ def main():
     args.model.load_state_dict(torch.load(args.ckpt)["model"])
     args.model.seg_img_compressor.update(force=True)
 
-    img, results = decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin)
+    img, results = decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin, lower_bound_bin)
     print("Decompression results:", results)
     img = TF.to_pil_image(img.byte())
     img.save(args.output)
