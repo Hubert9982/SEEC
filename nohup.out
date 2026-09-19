@@ -1,0 +1,760 @@
+/home/boruihu/miniconda3/envs/rawic/lib/python3.10/site-packages/compressai/models/video/google.py:353: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  @amp.autocast(enabled=False)
+Not using distributed mode
+[23:47:39.686315] Job directory: /home/boruihu/work/tmp/seec-bitdepth
+[23:47:39.686369] Arguments:
+{'config': 'configs/seg_T_mul_T_part4_bd.py',
+'store': True,
+'resume': '',
+'mute': False,
+'dist_on_itp': False,
+'seed': 1,
+'output_dir': 'experiments',
+'device': 'cuda',
+'batch_size': 64,
+'num_workers': 16,
+'lr': 0.0001,
+'aux_lr': 0.001,
+'num_epochs': 1500,
+'lr_reduce_patience': 30,
+'lr_reduce_factor': 0.9,
+'multistep': False,
+'gamma': 0.9,
+'clip_grad': 1.0,
+'p_hflip': 0.5,
+'p_vflip': 0.5,
+'train_path': './data/DIV2K_train_p128',
+'val_path': './data/DIV2K_valid_p128',
+'prefetch_factor': 8,
+'patch_sz': 64,
+'warmup': False,
+'warmup_epochs': 5,
+'dist_backend': 'nccl',
+'dist_url': 'env://',
+'world_size': 1,
+'num_ch': 192,
+'prior_ch': 256,
+'partite': 4,
+'y_ch_ch_out': 8,
+'y_sp_ch_out': 8,
+'fs_ch_out': 256,
+'x_sp_ch_out': 256,
+'fs_ch_in': 512,
+'no_multichannel_lmm': True,
+'mix_num': 5,
+'start_bit': 5,
+'end_bit': 8,
+'num_bits': 4,
+'emb_ch': 512,
+'num_cls': 2,
+'ep_ch_in': 256,
+'ep_ch_out': 50,
+'distributed': False}
+[23:47:39.686373] Global batch size: 64
+[23:47:39.686376] Learning rate: 0.0001
+[23:47:39.687784] Model = SeecBitDepthNet(
+  (seg_img_compressor): PriorCompressionModel(
+    (g_a): Analysis(
+      (layers): Sequential(
+        (0): AnalysisBlock(
+          (conv1): Conv2d(3, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (gdn): GDN(
+            (beta_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+            (gamma_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+          )
+          (skip): Conv2d(3, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (rb): ResidualBlock(
+            (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+            (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          )
+        )
+        (1): AnalysisBlock(
+          (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (gdn): GDN(
+            (beta_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+            (gamma_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+          )
+          (skip): Conv2d(192, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (rb): ResidualBlock(
+            (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+            (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          )
+        )
+        (2): SWin_Attention(
+          (conv_a): Sequential(
+            (0): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (1): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (2): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+          )
+          (conv_b): Sequential(
+            (0): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (1): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (2): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (3): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+        (3): AnalysisBlock(
+          (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+          (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (gdn): GDN(
+            (beta_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+            (gamma_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+          )
+          (skip): Conv2d(192, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+          (rb): ResidualBlock(
+            (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+            (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          )
+        )
+        (4): Conv2d(192, 192, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1))
+        (5): SWin_Attention(
+          (conv_a): Sequential(
+            (0): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (1): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (2): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+          )
+          (conv_b): Sequential(
+            (0): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (1): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (2): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (3): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+      )
+    )
+    (g_s): Synthesis(
+      (layers): Sequential(
+        (0): SWin_Attention(
+          (conv_a): Sequential(
+            (0): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (1): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (2): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+          )
+          (conv_b): Sequential(
+            (0): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (1): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (2): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (3): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+        (1): SynthesisBlock(
+          (rb): ResidualBlock(
+            (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+            (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          )
+          (conv_up): Sequential(
+            (0): Conv2d(192, 768, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (1): PixelShuffle(upscale_factor=2)
+          )
+          (igdn): GDN(
+            (beta_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+            (gamma_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+          )
+          (conv): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+          (upsample): Sequential(
+            (0): Conv2d(192, 768, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (1): PixelShuffle(upscale_factor=2)
+          )
+        )
+        (2): SynthesisBlock(
+          (rb): ResidualBlock(
+            (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+            (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          )
+          (conv_up): Sequential(
+            (0): Conv2d(192, 768, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (1): PixelShuffle(upscale_factor=2)
+          )
+          (igdn): GDN(
+            (beta_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+            (gamma_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+          )
+          (conv): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+          (upsample): Sequential(
+            (0): Conv2d(192, 768, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (1): PixelShuffle(upscale_factor=2)
+          )
+        )
+        (3): SWin_Attention(
+          (conv_a): Sequential(
+            (0): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (1): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+            (2): ResidualUnit(
+              (conv): Sequential(
+                (0): Conv2d(192, 96, kernel_size=(1, 1), stride=(1, 1))
+                (1): GELU(approximate='none')
+                (2): Conv2d(96, 96, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+                (3): GELU(approximate='none')
+                (4): Conv2d(96, 192, kernel_size=(1, 1), stride=(1, 1))
+              )
+              (relu): GELU(approximate='none')
+            )
+          )
+          (conv_b): Sequential(
+            (0): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (1): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (2): WinBasedAttention(
+              (attn): WindowAttention(
+                (qkv): Linear(in_features=192, out_features=576, bias=True)
+                (attn_drop): Dropout(p=0.0, inplace=False)
+                (proj): Linear(in_features=192, out_features=192, bias=True)
+                (proj_drop): Dropout(p=0.0, inplace=False)
+                (softmax): Softmax(dim=-1)
+              )
+              (drop_path): Identity()
+            )
+            (3): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+        (4): SynthesisBlock(
+          (rb): ResidualBlock(
+            (conv1): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+            (conv2): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          )
+          (conv_up): Sequential(
+            (0): Conv2d(192, 768, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (1): PixelShuffle(upscale_factor=2)
+          )
+          (igdn): GDN(
+            (beta_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+            (gamma_reparam): NonNegativeParametrizer(
+              (lower_bound): LowerBound()
+            )
+          )
+          (conv): Conv2d(192, 192, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (leaky_relu): LeakyReLU(negative_slope=0.01, inplace=True)
+          (upsample): Sequential(
+            (0): Conv2d(192, 768, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+            (1): PixelShuffle(upscale_factor=2)
+          )
+        )
+      )
+      (conv_prior): Sequential(
+        (0): Conv2d(192, 1024, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        (1): PixelShuffle(upscale_factor=2)
+      )
+    )
+    (latent_codec): HyperpriorLatentCodec(
+      (y): CustomChannelGroupsLatentCodec(
+        (channel_context): ModuleDict(
+          (y1): Sequential(
+            (0): Conv2d(48, 192, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (1): LeakyReLU(negative_slope=0.01, inplace=True)
+            (2): Conv2d(192, 272, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (3): LeakyReLU(negative_slope=0.01, inplace=True)
+            (4): Conv2d(272, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+          )
+          (y2): Sequential(
+            (0): Conv2d(96, 192, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (1): LeakyReLU(negative_slope=0.01, inplace=True)
+            (2): Conv2d(192, 288, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (3): LeakyReLU(negative_slope=0.01, inplace=True)
+            (4): Conv2d(288, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+          )
+          (y3): Sequential(
+            (0): Conv2d(144, 224, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (1): LeakyReLU(negative_slope=0.01, inplace=True)
+            (2): Conv2d(224, 304, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (3): LeakyReLU(negative_slope=0.01, inplace=True)
+            (4): Conv2d(304, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+          )
+        )
+        (latent_codec): ModuleDict(
+          (y0): CustomCheckerboardLatentCodec(
+            (entropy_parameters): Sequential(
+              (0): Conv2d(576, 416, kernel_size=(1, 1), stride=(1, 1))
+              (1): LeakyReLU(negative_slope=0.01, inplace=True)
+              (2): Conv2d(416, 384, kernel_size=(1, 1), stride=(1, 1))
+              (3): LeakyReLU(negative_slope=0.01, inplace=True)
+              (4): Conv2d(384, 96, kernel_size=(1, 1), stride=(1, 1))
+            )
+            (context_prediction): CheckerboardMaskedConv2d(48, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (y): CustomGaussianConditionalLatentCodec(
+              (gaussian_conditional): GaussianConditional(
+                (likelihood_lower_bound): LowerBound()
+                (lower_bound_scale): LowerBound()
+              )
+              (entropy_parameters): Identity()
+            )
+          )
+          (y1): CustomCheckerboardLatentCodec(
+            (entropy_parameters): Sequential(
+              (0): Conv2d(960, 672, kernel_size=(1, 1), stride=(1, 1))
+              (1): LeakyReLU(negative_slope=0.01, inplace=True)
+              (2): Conv2d(672, 384, kernel_size=(1, 1), stride=(1, 1))
+              (3): LeakyReLU(negative_slope=0.01, inplace=True)
+              (4): Conv2d(384, 96, kernel_size=(1, 1), stride=(1, 1))
+            )
+            (context_prediction): CheckerboardMaskedConv2d(48, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (y): CustomGaussianConditionalLatentCodec(
+              (gaussian_conditional): GaussianConditional(
+                (likelihood_lower_bound): LowerBound()
+                (lower_bound_scale): LowerBound()
+              )
+              (entropy_parameters): Identity()
+            )
+          )
+          (y2): CustomCheckerboardLatentCodec(
+            (entropy_parameters): Sequential(
+              (0): Conv2d(960, 672, kernel_size=(1, 1), stride=(1, 1))
+              (1): LeakyReLU(negative_slope=0.01, inplace=True)
+              (2): Conv2d(672, 384, kernel_size=(1, 1), stride=(1, 1))
+              (3): LeakyReLU(negative_slope=0.01, inplace=True)
+              (4): Conv2d(384, 96, kernel_size=(1, 1), stride=(1, 1))
+            )
+            (context_prediction): CheckerboardMaskedConv2d(48, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (y): CustomGaussianConditionalLatentCodec(
+              (gaussian_conditional): GaussianConditional(
+                (likelihood_lower_bound): LowerBound()
+                (lower_bound_scale): LowerBound()
+              )
+              (entropy_parameters): Identity()
+            )
+          )
+          (y3): CustomCheckerboardLatentCodec(
+            (entropy_parameters): Sequential(
+              (0): Conv2d(960, 672, kernel_size=(1, 1), stride=(1, 1))
+              (1): LeakyReLU(negative_slope=0.01, inplace=True)
+              (2): Conv2d(672, 384, kernel_size=(1, 1), stride=(1, 1))
+              (3): LeakyReLU(negative_slope=0.01, inplace=True)
+              (4): Conv2d(384, 96, kernel_size=(1, 1), stride=(1, 1))
+            )
+            (context_prediction): CheckerboardMaskedConv2d(48, 384, kernel_size=(5, 5), stride=(1, 1), padding=(2, 2))
+            (y): CustomGaussianConditionalLatentCodec(
+              (gaussian_conditional): GaussianConditional(
+                (likelihood_lower_bound): LowerBound()
+                (lower_bound_scale): LowerBound()
+              )
+              (entropy_parameters): Identity()
+            )
+          )
+        )
+      )
+      (hyper): CustomHyperLatentCodec(
+        (entropy_bottleneck): CustomEntropyBottleneck(
+          (likelihood_lower_bound): LowerBound()
+        )
+        (h_a): HyperAnalysis(
+          (layers): Sequential(
+            (0): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (1): LeakyReLU(negative_slope=0.01, inplace=True)
+            (2): Sequential(
+              (0): PixelUnshuffle(downscale_factor=2)
+              (1): Conv2d(768, 192, kernel_size=(1, 1), stride=(1, 1))
+            )
+            (3): LeakyReLU(negative_slope=0.01, inplace=True)
+            (4): Sequential(
+              (0): PixelUnshuffle(downscale_factor=2)
+              (1): Conv2d(768, 192, kernel_size=(1, 1), stride=(1, 1))
+            )
+            (5): LeakyReLU(negative_slope=0.01, inplace=True)
+            (6): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (7): LeakyReLU(negative_slope=0.01, inplace=True)
+            (8): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+        (h_s): HyperSynthesis(
+          (layers): Sequential(
+            (0): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (1): LeakyReLU(negative_slope=0.01, inplace=True)
+            (2): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+            (3): LeakyReLU(negative_slope=0.01, inplace=True)
+            (4): Sequential(
+              (0): Conv2d(192, 768, kernel_size=(1, 1), stride=(1, 1))
+              (1): PixelShuffle(upscale_factor=2)
+            )
+            (5): LeakyReLU(negative_slope=0.01, inplace=True)
+            (6): Sequential(
+              (0): Conv2d(192, 768, kernel_size=(1, 1), stride=(1, 1))
+              (1): PixelShuffle(upscale_factor=2)
+            )
+            (7): LeakyReLU(negative_slope=0.01, inplace=True)
+            (8): Conv2d(192, 192, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+      )
+    )
+  )
+  (sp_ctx): MaskedConv2d_P_64(3, 256, kernel_size=(7, 7), stride=(1, 1), padding=(3, 3))
+  (ep): EntropyModel(
+    (conv_outs): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
+        (1): ResBlock_1x1(
+          (layers): Sequential(
+            (0): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
+            (1): LeakyReLU(negative_slope=0.01, inplace=True)
+            (2): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
+            (3): LeakyReLU(negative_slope=0.01, inplace=True)
+            (4): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
+            (5): LeakyReLU(negative_slope=0.01, inplace=True)
+          )
+        )
+        (2): Conv2d(256, 256, kernel_size=(1, 1), stride=(1, 1))
+        (3): LeakyReLU(negative_slope=0.01, inplace=True)
+        (4): Conv2d(256, 50, kernel_size=(1, 1), stride=(1, 1))
+      )
+    )
+  )
+  (fusion): Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1))
+  (bit_emb): BitEmb(
+    (embedding): Sequential(
+      (0): Embedding(4, 512)
+      (1): Linear(in_features=512, out_features=3, bias=True)
+      (2): SiLU()
+      (3): Linear(in_features=3, out_features=3, bias=True)
+    )
+  )
+)
+[23:47:39.688341] Number of trainable parameters: 41.51M
+[23:47:39.818180] Optimizer = Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.0001
+    maximize: False
+    weight_decay: 0
+)
+[23:47:39.818198] Aux Optimizer = Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0
+)
+[23:47:39.825183] Experiment dir : experiments/run-20260918-234739
+[23:47:39.825193] Start training
+[23:55:10.559305] New best bpp: inf -> 13.6622. Saving model...
+[23:55:10.559329] Epoch: 1/ 1500, loss:13.6622
+[00:02:37.216402] New best bpp: 13.6622 -> 13.6193. Saving model...
+[00:02:37.216483] Epoch: 2/ 1500, loss:13.6193
+[00:10:03.917842] New best bpp: 13.6193 -> 11.7476. Saving model...
+[00:10:03.917908] Epoch: 3/ 1500, loss:11.7476
+[00:17:30.546018] Epoch: 4/ 1500, loss:12.0838
+[00:24:57.341117] New best bpp: 11.7476 -> 10.5802. Saving model...
+[00:24:57.341158] Epoch: 5/ 1500, loss:10.5802
+[00:32:24.294107] New best bpp: 10.5802 -> 10.4792. Saving model...
+[00:32:24.294163] Epoch: 6/ 1500, loss:10.4792
+[00:39:50.886663] Epoch: 7/ 1500, loss:10.7375
+[00:47:17.792168] New best bpp: 10.4792 -> 10.1615. Saving model...
+[00:47:17.792212] Epoch: 8/ 1500, loss:10.1615
+[00:54:44.632727] New best bpp: 10.1615 -> 9.9113. Saving model...
+[00:54:44.632778] Epoch: 9/ 1500, loss:9.9113
+[01:02:11.499712] New best bpp: 9.9113 -> 9.6646. Saving model...
+[01:02:11.499751] Epoch: 10/ 1500, loss:9.6646
+[01:09:43.506491] New best bpp: 9.6646 -> 9.6120. Saving model...
+[01:09:43.506576] Epoch: 11/ 1500, loss:9.6120
+[01:17:10.477645] New best bpp: 9.6120 -> 9.5451. Saving model...
+[01:17:10.477686] Epoch: 12/ 1500, loss:9.5451
+[01:24:37.220733] Epoch: 13/ 1500, loss:10.1981
+[01:32:04.382470] Epoch: 14/ 1500, loss:10.0388
+[01:39:31.198347] Epoch: 15/ 1500, loss:9.8384
+[01:46:58.886568] New best bpp: 9.5451 -> 9.2472. Saving model...
+[01:46:58.886640] Epoch: 16/ 1500, loss:9.2472
+[01:54:26.334893] Epoch: 17/ 1500, loss:9.3706
+[02:01:53.179652] Epoch: 18/ 1500, loss:9.5091
+[02:09:20.773971] New best bpp: 9.2472 -> 9.1588. Saving model...
+[02:09:20.774031] Epoch: 19/ 1500, loss:9.1588
+[02:16:47.478836] Epoch: 20/ 1500, loss:9.6470
+[02:24:14.339084] Epoch: 21/ 1500, loss:9.9652
+[02:31:41.285834] Epoch: 22/ 1500, loss:9.6607
+[02:39:08.792424] Epoch: 23/ 1500, loss:9.2454
+[02:46:36.535555] New best bpp: 9.1588 -> 8.8433. Saving model...
+[02:46:36.535597] Epoch: 24/ 1500, loss:8.8433
+[02:54:03.564276] Epoch: 25/ 1500, loss:9.0240
+[03:01:30.676472] Epoch: 26/ 1500, loss:8.9972
+[03:08:57.704000] Epoch: 27/ 1500, loss:9.1207
+[03:16:24.771625] Epoch: 28/ 1500, loss:8.9752
+[03:23:51.905090] Epoch: 29/ 1500, loss:9.7294
+[03:31:19.354640] New best bpp: 8.8433 -> 8.8373. Saving model...
+[03:31:19.354725] Epoch: 30/ 1500, loss:8.8373
+[03:38:46.863872] Epoch: 31/ 1500, loss:9.5155
+[03:46:13.769384] Epoch: 32/ 1500, loss:9.3109
+[03:53:40.995289] New best bpp: 8.8373 -> 8.7005. Saving model...
+[03:53:40.995326] Epoch: 33/ 1500, loss:8.7005
+[04:01:08.052538] Epoch: 34/ 1500, loss:9.2210
+[04:08:35.018982] Epoch: 35/ 1500, loss:9.0860
+[04:16:02.147187] Epoch: 36/ 1500, loss:8.7451
+[04:23:29.084377] Epoch: 37/ 1500, loss:8.7393
+[04:30:56.163655] Epoch: 38/ 1500, loss:8.7328
+[04:38:23.237191] Epoch: 39/ 1500, loss:8.8828
+[04:45:50.316171] Epoch: 40/ 1500, loss:9.3883
+[04:53:17.582227] New best bpp: 8.7005 -> 8.4618. Saving model...
+[04:53:17.582268] Epoch: 41/ 1500, loss:8.4618
+[05:00:44.867710] Epoch: 42/ 1500, loss:8.5937
+[05:08:12.029038] Epoch: 43/ 1500, loss:9.8654
+[05:15:39.178087] Epoch: 44/ 1500, loss:8.8523
+[05:23:06.803499] Epoch: 45/ 1500, loss:8.7802
+[05:30:33.883882] Epoch: 46/ 1500, loss:9.0419
+[05:38:00.953751] Epoch: 47/ 1500, loss:8.4707
+[05:45:28.016156] Epoch: 48/ 1500, loss:8.6728
+[05:52:55.093362] Epoch: 49/ 1500, loss:9.1494
+[06:00:22.182450] Epoch: 50/ 1500, loss:9.2299
+[06:07:49.334133] Epoch: 51/ 1500, loss:8.5098
+[06:15:16.303881] Epoch: 52/ 1500, loss:8.6646
+[06:22:43.764176] Epoch: 53/ 1500, loss:9.0701
+[06:30:10.846244] Epoch: 54/ 1500, loss:8.7700
+[06:37:37.846275] Epoch: 55/ 1500, loss:9.0832
+[06:45:05.414646] Epoch: 56/ 1500, loss:8.5165
+[06:52:33.100488] Epoch: 57/ 1500, loss:9.0978
+[07:00:00.151720] Epoch: 58/ 1500, loss:8.6732
+[07:07:27.831358] Epoch: 59/ 1500, loss:8.7251
+[07:14:54.812635] Epoch: 60/ 1500, loss:8.7211
+[07:22:22.496219] Epoch: 61/ 1500, loss:8.8787
+[07:29:49.855085] New best bpp: 8.4618 -> 8.3991. Saving model...
+[07:29:49.855139] Epoch: 62/ 1500, loss:8.3991
+[07:37:16.775919] Epoch: 63/ 1500, loss:8.4474
+[07:44:43.831273] New best bpp: 8.3991 -> 8.2863. Saving model...
+[07:44:43.831325] Epoch: 64/ 1500, loss:8.2863
+[07:52:10.978051] Epoch: 65/ 1500, loss:8.8778
+[07:59:38.042561] Epoch: 66/ 1500, loss:8.9004
+[08:07:05.640475] Epoch: 67/ 1500, loss:8.4460
+[08:14:32.781825] Epoch: 68/ 1500, loss:8.4673
+[08:22:00.444113] Epoch: 69/ 1500, loss:8.3863
+[08:29:27.949545] Epoch: 70/ 1500, loss:8.8122
+[08:36:55.092413] Epoch: 71/ 1500, loss:8.7278
+[08:44:22.324352] Epoch: 72/ 1500, loss:8.3019
+[08:51:49.667645] Epoch: 73/ 1500, loss:8.5447
+[08:59:16.830789] Epoch: 74/ 1500, loss:8.4991
+[09:06:44.654825] Epoch: 75/ 1500, loss:8.3421
+[09:14:11.917002] Epoch: 76/ 1500, loss:8.4687
+[09:21:39.062875] Epoch: 77/ 1500, loss:8.6591
+[09:29:06.284829] Epoch: 78/ 1500, loss:8.3770
+[09:36:33.908581] Epoch: 79/ 1500, loss:8.4195
+[09:44:01.011442] Epoch: 80/ 1500, loss:8.4103
+[09:51:33.800773] New best bpp: 8.2863 -> 8.2636. Saving model...
+[09:51:33.800858] Epoch: 81/ 1500, loss:8.2636
+[09:59:00.935325] Epoch: 82/ 1500, loss:8.2754
+[10:06:28.044634] Epoch: 83/ 1500, loss:8.5120
+[10:13:55.673764] Epoch: 84/ 1500, loss:8.3196
+[10:21:22.851353] Epoch: 85/ 1500, loss:8.3671
+[10:28:50.420521] Epoch: 86/ 1500, loss:8.5684
+[10:36:18.041589] Epoch: 87/ 1500, loss:8.5272
+[10:43:45.598763] Epoch: 88/ 1500, loss:8.7205
+[10:51:13.220543] Epoch: 89/ 1500, loss:8.4184
+[10:58:40.573011] Epoch: 90/ 1500, loss:8.3062
+[11:06:08.158847] New best bpp: 8.2636 -> 8.1919. Saving model...
+[11:06:08.158881] Epoch: 91/ 1500, loss:8.1919
+[11:13:35.387138] Epoch: 92/ 1500, loss:8.3976
+[11:21:02.971575] Epoch: 93/ 1500, loss:8.5209
+[11:28:30.178881] Epoch: 94/ 1500, loss:8.3685
+[11:35:57.536986] Epoch: 95/ 1500, loss:8.4115
+[11:43:25.325037] Epoch: 96/ 1500, loss:8.2955
+[11:50:53.279755] New best bpp: 8.1919 -> 8.1646. Saving model...
+[11:50:53.279804] Epoch: 97/ 1500, loss:8.1646
+[11:58:20.902187] Epoch: 98/ 1500, loss:8.6765
+[12:05:48.795290] Epoch: 99/ 1500, loss:8.3030
+[12:13:16.838184] Epoch: 100/ 1500, loss:8.2300
+[12:20:44.773495] Epoch: 101/ 1500, loss:8.3931
+[12:28:12.752275] Epoch: 102/ 1500, loss:8.3630
+[12:35:40.271622] Epoch: 103/ 1500, loss:8.5339

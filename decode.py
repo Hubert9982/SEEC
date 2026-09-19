@@ -1,13 +1,16 @@
-import torch
+import pickle
 import numpy as np
+
+import torch
 import torch.nn.functional as F
 import torchac
-from model.seec import SeecNet
-import pickle
-from utils.func import img2patch, patch2img, coding_table_3p, Timer
 import imagecodecs
 import torchvision.transforms.functional as TF
+
+from model.bitdepth_codec import decompress_patches, unpack_bit_depth
+from model.seec import SeecNet
 import utils.builder as builder
+from utils.func import Timer, coding_table_3p, img2patch, patch2img
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 patch_sz = 64
@@ -20,15 +23,48 @@ samples = samples * norm_scale
 COT = coding_table_3p(patch_sz=patch_sz).to(device)
 
 
-def decompress(args, latent_code, x_stream, img_shape, seg_bin):
+def decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin=None):
 
     results = {}
     is_padding = img_shape[0] % patch_sz != 0 or img_shape[1] % patch_sz != 0
     model = args.model.to(device)
-    with Timer(results, "seg_dec_time"):
-        torch.cuda.synchronize()
-        seg = imagecodecs.jpegxl_decode(seg_bin)
-        seg = torch.tensor(np.array(seg), dtype=torch.int64).unsqueeze(0).to(device)
+    if getattr(model, "uses_segmentation", True):
+        with Timer(results, "seg_dec_time"):
+            torch.cuda.synchronize()
+            seg = imagecodecs.jpegxl_decode(seg_bin)
+            seg = torch.tensor(np.array(seg), dtype=torch.int64).unsqueeze(0).to(device)
+    else:
+        results["seg_dec_time"] = 0.0
+        seg = torch.zeros((1, img_shape[0], img_shape[1]), dtype=torch.int64, device=device)
+
+    if getattr(model, "is_bit_depth_model", False):
+        height = (img_shape[0] + patch_sz - 1) // patch_sz
+        width = (img_shape[1] + patch_sz - 1) // patch_sz
+        patch_count = height * width
+        if bit_depth_bin is None:
+            raise ValueError("bit-depth side information is required by the bit-depth model")
+        bit_depth = unpack_bit_depth(bit_depth_bin, patch_count, model.start_bit)
+        seg_patch = img2patch(seg, patch_sz=patch_sz)
+        code_flag = None
+        if img_shape[0] % patch_sz != 0 or img_shape[1] % patch_sz != 0:
+            code_flag = img2patch(torch.ones_like(seg), patch_sz=patch_sz)
+        with Timer(results, "decompress_time"):
+            with torch.no_grad():
+                model.eval()
+                x_tmp, _ = decompress_patches(
+                    model,
+                    latent_code,
+                    x_stream,
+                    bit_depth,
+                    seg_patch,
+                    img_shape,
+                    code_flag,
+                    patch_sz,
+                )
+        x = patch2img(x_tmp, img_shape).clamp(0, 255)
+        results["bit_depth_bpp"] = len(bit_depth_bin) * 8 / (img_shape[0] * img_shape[1])
+        results["dec_time"] = results["decompress_time"] + results["seg_dec_time"]
+        return x[0].cpu(), results
 
     with Timer(results, "decompress_time"):
 
@@ -166,13 +202,18 @@ def main():
     torch.set_grad_enabled(False)
 
     with open(args.input, "rb") as f:
-        latent_code, seg_bin, x_stream, img_shape = pickle.load(f)
+        payload = pickle.load(f)
+    if len(payload) == 5:
+        latent_code, seg_bin, x_stream, img_shape, bit_depth_bin = payload
+    else:
+        latent_code, seg_bin, x_stream, img_shape = payload
+        bit_depth_bin = None
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     args.model.load_state_dict(torch.load(args.ckpt)["model"])
     args.model.seg_img_compressor.update(force=True)
 
-    img, results = decompress(args, latent_code, x_stream, img_shape, seg_bin)
+    img, results = decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin)
     print("Decompression results:", results)
     img = TF.to_pil_image(img.byte())
     img.save(args.output)

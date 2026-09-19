@@ -7,6 +7,7 @@ import hashlib
 import time
 from model.distribution.lmm import MixtureLogistic
 from model.distribution.rgb_lmm import RGBMixtureLogistic, MultiRGBMixtureLogistic
+from model.distribution.rgb_lmm_bit import RGBMixtureLogisticDiffBitdepth
 
 
 def check_path(path):
@@ -54,7 +55,7 @@ def get_entropy_model_channels(dist):
     if dist == MixtureLogistic:
         return dist.mix_num * 3  # mu, log_sigma, weights for every pixel
 
-    elif dist == RGBMixtureLogistic or dist == MultiRGBMixtureLogistic:
+    elif dist in (RGBMixtureLogistic, MultiRGBMixtureLogistic, RGBMixtureLogisticDiffBitdepth):
         return dist.mix_num * 10 if dist.no_multichannel_lmm else dist.mix_num * 12
 
     # TODO add more

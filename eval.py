@@ -1,15 +1,16 @@
+import math
+import os
+
 import torch
 from PIL import Image
 from torchvision import transforms
-from model.loss import BPPLoss
-import os
-from model_hub.models.birefnet import BiRefNet
+from tqdm import tqdm
+
 from encode import compress
 from decode import decompress
-from utils.func import get_md5, AverageMeter, check_state_dict
-from utils.func import img2patch, extract_mask
 import utils.builder as builder
-from tqdm import tqdm
+from model.loss import BPPLoss
+from utils.func import AverageMeter, check_state_dict, extract_mask, get_md5, img2patch
 
 
 def config_parser():
@@ -56,15 +57,18 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.set_grad_enabled(False)
-    birefnet = BiRefNet(bb_pretrained=False)
-    state_dict = torch.load(args.birefnet_ckpt, map_location="cpu")
-    state_dict = check_state_dict(state_dict)
-    birefnet.load_state_dict(state_dict)
-    birefnet.to(device)
-    birefnet.eval()
-    birefnet.half()
-
     model = args.model
+    birefnet = None
+    if getattr(model, "uses_segmentation", True):
+        from model_hub.models.birefnet import BiRefNet
+
+        birefnet = BiRefNet(bb_pretrained=False)
+        state_dict = torch.load(args.birefnet_ckpt, map_location="cpu")
+        state_dict = check_state_dict(state_dict)
+        birefnet.load_state_dict(state_dict)
+        birefnet.to(device)
+        birefnet.eval()
+        birefnet.half()
 
     model.load_state_dict(torch.load(args.ckpt)["model"])
     model.to(device)
@@ -91,6 +95,7 @@ def main():
             y_bpp = AverageMeter()
             z_bpp = AverageMeter()
             seg_bpp = AverageMeter()
+            bit_depth_bpp = AverageMeter()
             seg_enc_time = AverageMeter()
             seg_extract_time = AverageMeter()
 
@@ -102,8 +107,13 @@ def main():
                 try:
                     enc_results, dec_results = torch.load(os.path.join(args.cache_dir, cache_key))
                 except:
-                    latent_code, x_stream, seg_bin, img_shape, enc_results = compress(args, img_path, birefnet)
-                    img, dec_results = decompress(args, latent_code, x_stream, img_shape, seg_bin)
+                    compressed = compress(args, img_path, birefnet)
+                    if getattr(model, "is_bit_depth_model", False):
+                        latent_code, x_stream, seg_bin, img_shape, enc_results, bit_depth_bin = compressed
+                    else:
+                        latent_code, x_stream, seg_bin, img_shape, enc_results = compressed
+                        bit_depth_bin = None
+                    img, dec_results = decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin)
                     original_img = Image.open(img_path).convert("RGB")
                     original_img = transforms.PILToTensor()(original_img)
                     # assert torch.all(img == original_img), "Decoded image does not match the original image"
@@ -115,6 +125,7 @@ def main():
                 y_bpp.update(enc_results["y_bpp"])
                 z_bpp.update(enc_results["z_bpp"])
                 seg_bpp.update(enc_results["seg_bpp"])
+                bit_depth_bpp.update(enc_results.get("bit_depth_bpp", 0.0))
                 seg_enc_time.update(enc_results["seg_enc_time"])
                 seg_extract_time.update(enc_results.get("seg_extract_time", 0.0))
 
@@ -128,17 +139,23 @@ def main():
             print(f"Average Segmentation BPP: {seg_bpp.avg:.4f}")
             print(f"Average Segmentation Extraction Time: {seg_extract_time.avg:.2f} seconds")
             print(f"Average Segmentation Encoding Time: {seg_enc_time.avg:.2f} seconds")
+            if getattr(model, "is_bit_depth_model", False):
+                print(f"Average Bit-depth BPP: {bit_depth_bpp.avg:.4f}")
 
     else:
         criterion = BPPLoss()
         for imgdir in args.imgdir:
             Nll = AverageMeter()
             X_bpp = AverageMeter()
+            BD_bpp = AverageMeter()
             for path in os.listdir(imgdir):
                 img_path = os.path.join(imgdir, path)
 
                 img = Image.open(img_path).convert("RGB")
-                seg = extract_mask(birefnet, img, args.segtype)
+                if getattr(model, "uses_segmentation", True):
+                    seg = extract_mask(birefnet, img, args.segtype)
+                else:
+                    seg = torch.zeros((1, img.size[1], img.size[0]), dtype=torch.uint8)
                 img = transforms.ToTensor()(img).to(device)
                 x = img2patch(img, patch_sz=64).to(device)
                 seg = img2patch(seg, patch_sz=64).to(device)
@@ -153,11 +170,17 @@ def main():
                     nll += output["loss"].item() * x_split.numel() / x_split.shape[1]
                 nll = nll / img.size(1) / img.size(2)
                 x_bpp = x_bpp / img.size(1) / img.size(2)
+                if getattr(model, "is_bit_depth_model", False):
+                    packed_bytes = math.ceil(x.shape[0] / 4)
+                    BD_bpp.update(packed_bytes * 8.0 / (img.size(1) * img.size(2)))
+                    nll += BD_bpp.val
                 Nll.update(nll)
                 X_bpp.update(x_bpp)
             print(f"Results for {imgdir}:")
             print(f"Average X bpp: {X_bpp.avg:.4f}")
             print(f"Average NLL: {Nll.avg:.4f}")
+            if getattr(model, "is_bit_depth_model", False):
+                print(f"Average Bit-depth BPP: {BD_bpp.avg:.4f}")
 
 
 if __name__ == "__main__":

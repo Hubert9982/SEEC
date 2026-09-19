@@ -9,14 +9,14 @@ from datasets.dataset import ImgMaskDataset
 # Training parameters
 seed = 1
 output_dir = "experiments"
-device = "cpu"
+device = "cuda"
 batch_size = 64
 num_workers = 16
 lr = 0.0001
 aux_lr = 0.001
 # blr = 0.0001
 # aux_blr = 0.001
-num_epochs = 1500
+num_epochs = 600
 lr_reduce_patience = 30
 lr_reduce_factor = 0.9
 multistep = False
