@@ -47,12 +47,24 @@ def config_parser():
     return parser.parse_args()
 
 
+def evaluation_cache_key(args, img_path, config_path):
+    paths = [args.ckpt, img_path, config_path]
+    if getattr(args.model, "uses_segmentation", True) and args.segtype != "random":
+        paths.append(args.birefnet_ckpt)
+    signatures = []
+    for path in paths:
+        stat = os.stat(path)
+        signatures.append((os.path.realpath(path), stat.st_size, stat.st_mtime_ns))
+    return get_md5(repr(signatures), args.segtype)
+
+
 def main():
     args = config_parser()
     if args.config:
-        config = builder.load_config(args.config)
+        config_path = args.config
     else:
-        config = builder.load_config(builder.ckpt2config(args.ckpt))
+        config_path = builder.ckpt2config(args.ckpt)
+    config = builder.load_config(config_path)
     args = builder.merge_config_args(config, args)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -105,7 +117,7 @@ def main():
 
                 img_path = os.path.join(imgdir, path)
 
-                cache_key = get_md5(args.ckpt, img_path, args.segtype)
+                cache_key = evaluation_cache_key(args, img_path, config_path)
                 try:
                     enc_results, dec_results = torch.load(os.path.join(args.cache_dir, cache_key))
                 except:
@@ -128,7 +140,8 @@ def main():
                     )
                     original_img = Image.open(img_path).convert("RGB")
                     original_img = transforms.PILToTensor()(original_img)
-                    # assert torch.all(img == original_img), "Decoded image does not match the original image"
+                    if not torch.equal(img, original_img):
+                        raise RuntimeError(f"Decoded image does not match the original image: {img_path}")
                     torch.save((enc_results, dec_results), os.path.join(args.cache_dir, cache_key))
                 bpp.update(enc_results["bpp"])
                 enc_time.update(enc_results["enc_time"])

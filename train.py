@@ -1,6 +1,7 @@
 import os
 import time
 import argparse
+import shutil
 from pathlib import Path
 
 import torch
@@ -12,6 +13,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import utils.misc as misc
 import utils.builder as builder
 import utils.dist as dist
+from configs import default as default_config
 
 from engine import train_epoch, eval_epoch
 
@@ -124,6 +126,7 @@ def train(args):
         scheduler.load_state_dict(ckp["scheduler"])
         train_step = ckp["step"]
         best_bpp = ckp["best_bpp"]
+        best_epoch = ckp.get("best_epoch", -1)
         del ckp
         print("Resume from {}, start epoch {}".format(ckpt_dir, start_epoch))
 
@@ -131,6 +134,7 @@ def train(args):
         start_epoch = 0
         train_step = 0
         best_bpp = float("inf")
+        best_epoch = -1
         args.output_dir = os.path.join(args.output_dir, "run-{}".format(time.strftime("%Y%m%d-%H%M%S")))
 
         if os.path.exists(args.output_dir):
@@ -176,6 +180,15 @@ def train(args):
             else:
                 scheduler.step()
 
+            if val_loss < best_bpp:
+                print("New best bpp: {:.4f} -> {:.4f}. Saving model...".format(best_bpp, val_loss))
+                best_bpp = val_loss
+                best_epoch = epoch
+                dist.save_on_master(
+                    {"model": model_without_ddp.state_dict(), "epoch": epoch, "val_loss": val_loss},
+                    os.path.join(ckpt_dir, "best_model.pt"),
+                )
+
             checkpoint = {
                 "epoch": epoch,
                 "model": model_without_ddp.state_dict(),
@@ -184,6 +197,7 @@ def train(args):
                 "scheduler": scheduler.state_dict(),
                 "step": train_step,
                 "best_bpp": best_bpp,
+                "best_epoch": best_epoch,
             }
             dist.save_on_master(checkpoint, os.path.join(ckpt_dir, "model.pt"))
 
@@ -194,16 +208,10 @@ def train(args):
                 if dist.is_main_process() and not os.path.exists(checkpoint_path):
                     torch.save(checkpoint, checkpoint_path)
                     print(f"Saved persistent checkpoint: {checkpoint_path}")
-            if val_loss < best_bpp:
-
-                dist.save_on_master(
-                    {
-                        "model": model.state_dict(),
-                    },
-                    os.path.join(ckpt_dir, "best_model.pt"),
-                )
-                print("New best bpp: {:.4f} -> {:.4f}. Saving model...".format(best_bpp, val_loss))
-                best_bpp = val_loss
+                best_path = os.path.join(ckpt_dir, f"best_model_{checkpoint_epoch}.pt")
+                if dist.is_main_process() and not os.path.exists(best_path):
+                    shutil.copy2(os.path.join(ckpt_dir, "best_model.pt"), best_path)
+                    print(f"Saved best model through epoch {checkpoint_epoch}: {best_path}")
 
             print("Epoch: {}/ {}, loss:{:.4f}".format(epoch + 1, args.num_epochs, val_loss))
 
@@ -229,10 +237,17 @@ def get_args_parser():
     return parser.parse_args()
 
 
+def load_training_config(config_path):
+    # Derived configs import and cache their parent modules, which construct most
+    # of the model. Seed before the first import so that those weights are stable.
+    misc.set_seed(default_config.seed)
+    return builder.load_config(config_path)
+
+
 if __name__ == "__main__":
 
     args = get_args_parser()
-    config = builder.load_config(args.config)
+    config = load_training_config(args.config)
     args = builder.merge_config_args(config, args)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     train(args)

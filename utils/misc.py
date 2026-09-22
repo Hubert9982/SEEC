@@ -4,6 +4,7 @@ import shutil
 import argparse
 import numpy as np
 import hashlib
+import random
 import time
 from model.distribution.lmm import MixtureLogistic
 from model.distribution.rgb_lmm import RGBMixtureLogistic, MultiRGBMixtureLogistic
@@ -17,6 +18,7 @@ def check_path(path):
 
 
 def set_seed(seed):
+    random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
