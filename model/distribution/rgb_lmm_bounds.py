@@ -24,7 +24,10 @@ class RGBMixtureLogisticBounds(nn.Module):
 
     def _log_probs(self, input: torch.Tensor, alphabet_size: torch.Tensor) -> torch.Tensor:
         n, _, h, w = input.shape
-        half = (1.0 / (alphabet_size.to(input.dtype) - 1.0)).reshape(n, 1, 1, 1, 1)
+        if alphabet_size.ndim == 2:
+            half = (1.0 / (alphabet_size.to(input.dtype) - 1.0)).reshape(n, 3, 1, 1, 1)
+        else:
+            half = (1.0 / (alphabet_size.to(input.dtype) - 1.0)).reshape(n, 1, 1, 1, 1)
         x = input.reshape(n, 3, 1, h, w).expand(-1, -1, self.mix_num, -1, -1)
 
         m1 = self.mean[:, 0:1]

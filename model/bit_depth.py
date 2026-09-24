@@ -116,6 +116,36 @@ def normalize_by_bounds(
     return estimate_bounds(x, start_bit, end_bit, valid_mask)
 
 
+def normalize_by_channel_bounds(x, start_bit=5, end_bit=8, valid_mask=None):
+    """Estimate and apply independent quantized upper/lower bounds per RGB channel."""
+    symbols = to_uint8(x)
+    if valid_mask is None:
+        expanded = None
+        minimum = symbols.flatten(2).amin(dim=2)
+        maximum = symbols.flatten(2).amax(dim=2)
+    else:
+        mask = valid_mask.to(device=symbols.device).bool()
+        if mask.ndim != 4 or mask.shape[0] != symbols.shape[0] or mask.shape[1] != 1 or mask.shape[-2:] != symbols.shape[-2:]:
+            raise ValueError("valid_mask must have shape B1HW matching x")
+        expanded = mask.expand_as(symbols)
+        if torch.any(mask.flatten(1).sum(dim=1) == 0):
+            raise ValueError("each patch must contain at least one valid pixel")
+        minimum = symbols.masked_fill(~expanded, 255).flatten(2).amin(dim=2)
+        maximum = symbols.masked_fill(~expanded, 0).flatten(2).amax(dim=2)
+    depth = torch.ceil(torch.log2(maximum.to(torch.float32) + 1)).clamp(start_bit, end_bit).long()
+    lower_code = torch.where(minimum < 32, 0, torch.where(minimum < 64, 1, torch.where(minimum < 128, 2, 3))).long()
+    lower_value = torch.tensor((0, 32, 64, 128), device=symbols.device, dtype=torch.int64)[lower_code]
+    upper_value = 2**depth - 1
+    alphabet_size = upper_value - lower_value + 1
+    if torch.any(alphabet_size <= 1):
+        raise ValueError("per-channel bounds must leave at least two symbols")
+    residual = symbols.to(torch.float32) - lower_value[:, :, None, None]
+    if expanded is not None:
+        residual = residual.masked_fill(~expanded, 0)
+    normalized = residual / (alphabet_size - 1).to(torch.float32)[:, :, None, None]
+    return normalized, residual.long(), depth, lower_code, lower_value, alphabet_size
+
+
 def estimate_configured_bounds(
     x: torch.Tensor,
     upper_mode: str,

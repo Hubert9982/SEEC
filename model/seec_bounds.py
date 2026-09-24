@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from model.bit_depth import normalize_by_bounds
+from model.bit_depth import normalize_by_bounds, normalize_by_channel_bounds
 from model.seec import SeecNet
 
 
@@ -64,4 +64,26 @@ class SeecBoundsNet(SeecNet):
         return 1
 
 
-__all__ = ["SeecBoundsNet"]
+class SeecChannelBoundsNet(SeecBoundsNet):
+    """SEEC with independent upper and lower bounds for each RGB channel."""
+    is_channel_bounds_model = True
+
+    def normalize_input(self, x, valid_mask=None):
+        return normalize_by_channel_bounds(x, self.start_bit, self.end_bit, valid_mask)
+
+    def bound_condition(self, upper_depth, lower_code):
+        # Use output component c from channel c's embedding to form Bx3 features.
+        channel_conditions = []
+        for channel in range(3):
+            embedded = (
+                self.bit_emb(upper_depth[:, channel] - self.start_bit)
+                + self.lower_emb(lower_code[:, channel])
+            )
+            channel_conditions.append(embedded[:, channel, :, :])
+        return torch.stack(channel_conditions, dim=1)
+
+    def get_bit_depth_num(self):
+        return 3
+
+
+__all__ = ["SeecBoundsNet", "SeecChannelBoundsNet"]

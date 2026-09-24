@@ -26,14 +26,20 @@ def _cdf_from_channel(model, params, alphabet_size, residual_crop, channel, max_
         weights = weights.reshape(batch, 3, mix_num, count)
     weights = weights.permute(0, 3, 1, 2)
 
-    denominator = (alphabet_size.to(residual_crop.dtype) - 1.0).view(batch, 1, 1)
+    channel_alphabet = alphabet_size[:, channel] if alphabet_size.ndim == 2 else alphabet_size
+    denominator = (channel_alphabet.to(residual_crop.dtype) - 1.0).view(batch, 1, 1)
     half = (1.0 / denominator).view(batch, 1, 1, 1)
     sample_symbols = torch.arange(max_width, device=params.device, dtype=params.dtype).view(1, 1, max_width)
-    valid = sample_symbols < alphabet_size.view(batch, 1, 1)
+    valid = sample_symbols < channel_alphabet.view(batch, 1, 1)
     samples = (sample_symbols / denominator) * 2.0
     samples = samples.expand(batch, count, max_width)
 
-    x_crop = (residual_crop.squeeze(-1).permute(0, 2, 1) / denominator) * 2.0
+    residual_channels = residual_crop.squeeze(-1).permute(0, 2, 1)
+    if alphabet_size.ndim == 2:
+        all_denominators = (alphabet_size.to(residual_crop.dtype) - 1.0)[:, None, :]
+        x_crop = (residual_channels / all_denominators) * 2.0
+    else:
+        x_crop = (residual_channels / denominator) * 2.0
     current = samples.unsqueeze(2).expand(-1, -1, mix_num, -1)
     channel_mean = mean[:, :, channel]
     if channel == 1:
@@ -71,9 +77,7 @@ def compress_patches(model, x, seg, code_flag, patch_sz=64):
     device = next(model.parameters()).device
     x, seg = x.to(device), seg.to(device)
     code_flag = code_flag.to(device) if code_flag is not None else None
-    x_norm, residual, bit_depth, lower_code, lower_value, alphabet_size = normalize_by_bounds(
-        x, model.start_bit, model.end_bit, code_flag
-    )
+    x_norm, residual, bit_depth, lower_code, lower_value, alphabet_size = model.normalize_input(x, code_flag)
     latent_code = model.seg_img_compressor.compress(x_norm + model.bound_condition(bit_depth, lower_code))
     prior_total = model.seg_img_compressor.decompress(**latent_code)["prior"]
     context_total = model.sp_ctx(x_norm * 2.0)
@@ -112,6 +116,9 @@ def decompress_patches(model, latent_code, streams, bit_depth, lower_code, seg, 
     device = next(model.parameters()).device
     bit_depth = bit_depth.to(device=device, dtype=torch.int64)
     lower_code = lower_code.to(device=device, dtype=torch.int64)
+    if getattr(model, "is_channel_bounds_model", False):
+        bit_depth = bit_depth.reshape(-1, 3)
+        lower_code = lower_code.reshape(-1, 3)
     lower_value = lower_code_to_value(lower_code)
     alphabet_size = (2**bit_depth - lower_value).to(torch.int64)
     seg = seg.to(device)
@@ -121,7 +128,10 @@ def decompress_patches(model, latent_code, streams, bit_depth, lower_code, seg, 
     residual_tmp = torch.zeros(batch, 3, prior_total.shape[2], prior_total.shape[3], device=device)
     streams_index = 0
     code_flag = code_flag.to(device) if code_flag is not None else None
-    denominator = (alphabet_size.to(torch.float32) - 1.0).view(batch, 1, 1, 1)
+    if alphabet_size.ndim == 2:
+        denominator = (alphabet_size.to(torch.float32) - 1.0)[:, :, None, None]
+    else:
+        denominator = (alphabet_size.to(torch.float32) - 1.0).view(batch, 1, 1, 1)
     for step in range(int(coding_table.max().item())):
         h_idx, w_idx = torch.nonzero(coding_table == step + 1, as_tuple=True)
         context = model.sp_ctx((residual_tmp / denominator) * 2.0)[:, :, h_idx, w_idx].unsqueeze(3)
@@ -141,7 +151,8 @@ def decompress_patches(model, latent_code, streams, bit_depth, lower_code, seg, 
                 residual_crop[:, channel, :, 0] = symbols.to(device).float()
             streams_index += 1
         residual_tmp[:, :, h_idx, w_idx] = residual_crop.squeeze(3)
-    decoded = residual_tmp + lower_value.view(batch, 1, 1, 1).to(residual_tmp.dtype)
+    lower_offset = lower_value[:, :, None, None] if lower_value.ndim == 2 else lower_value.view(batch, 1, 1, 1)
+    decoded = residual_tmp + lower_offset.to(residual_tmp.dtype)
     return decoded.clamp(0, 255), streams_index
 
 

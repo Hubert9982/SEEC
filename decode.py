@@ -76,8 +76,9 @@ def decompress(args, latent_code, x_stream, img_shape, seg_bin, bit_depth_bin=No
             raise ValueError("bit-depth side information is required by the bounds model")
         if lower_bound_bin is None:
             raise ValueError("lower-bound side information is required by the bounds model")
-        bit_depth = unpack_bit_depth(bit_depth_bin, patch_count, model.start_bit)
-        lower_code = unpack_lower_bound(lower_bound_bin, patch_count)
+        metadata_count = patch_count * 3 if getattr(model, "is_channel_bounds_model", False) else patch_count
+        bit_depth = unpack_bit_depth(bit_depth_bin, metadata_count, model.start_bit)
+        lower_code = unpack_lower_bound(lower_bound_bin, metadata_count)
         seg_patch = img2patch(seg, patch_sz=patch_sz)
         code_flag = None
         if img_shape[0] % patch_sz != 0 or img_shape[1] % patch_sz != 0:

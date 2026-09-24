@@ -182,6 +182,7 @@ def main():
             BD_bpp = AverageMeter()
             LB_bpp = AverageMeter()
             Bounds_bpp = AverageMeter()
+            Total_bpp = AverageMeter()
             for path in os.listdir(imgdir):
                 img_path = os.path.join(imgdir, path)
 
@@ -216,19 +217,30 @@ def main():
                     nll += (x_bits + latent_bits).item()
                 nll = nll / img.size(1) / img.size(2)
                 x_bpp = x_bpp / img.size(1) / img.size(2)
+                pixel_count = img.size(1) * img.size(2)
+                side_bpp = 0.0
                 if getattr(model, "is_range_model", False):
                     packed_bytes = math.ceil(x.shape[0] * model.bound_bits_per_patch / 8)
-                    Bounds_bpp.update(packed_bytes * 8.0 / (img.size(1) * img.size(2)))
+                    side_bpp = packed_bytes * 8.0 / pixel_count
+                    Bounds_bpp.update(side_bpp)
                 elif getattr(model, "is_bit_depth_model", False):
-                    packed_bytes = math.ceil(x.shape[0] / 4)
-                    BD_bpp.update(packed_bytes * 8.0 / (img.size(1) * img.size(2)))
+                    metadata_count = x.shape[0] * (3 if getattr(model, "is_channel_bounds_model", False) else 1)
+                    upper_bytes = math.ceil(metadata_count / 4)
+                    upper_bpp = upper_bytes * 8.0 / pixel_count
+                    BD_bpp.update(upper_bpp)
+                    side_bpp += upper_bpp
                 if getattr(model, "is_bounds_model", False):
-                    LB_bpp.update(packed_bytes * 8.0 / (img.size(1) * img.size(2)))
+                    lower_bytes = math.ceil(metadata_count / 4)
+                    lower_bpp = lower_bytes * 8.0 / pixel_count
+                    LB_bpp.update(lower_bpp)
+                    side_bpp += lower_bpp
                 Nll.update(nll)
                 X_bpp.update(x_bpp)
+                Total_bpp.update(nll + side_bpp + 12 * 8.0 / pixel_count)
             print(f"Results for {imgdir}:")
             print(f"Average X bpp: {X_bpp.avg:.4f}")
             print(f"Average NLL: {Nll.avg:.4f}")
+            print(f"Average Estimated Total BPP (NLL + side information + shape bytes): {Total_bpp.avg:.4f}")
             if getattr(model, "is_range_model", False):
                 print(f"Average Bounds BPP: {Bounds_bpp.avg:.4f}")
             elif getattr(model, "is_bit_depth_model", False):
