@@ -5,6 +5,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def cross_channel_scale_ratios(alphabet_size: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """RGB coefficient order: R->G, R->B, G->B; widths exclude the endpoint."""
+    if alphabet_size.ndim == 1:
+        return torch.ones(alphabet_size.shape[0], 3, device=alphabet_size.device, dtype=dtype)
+    if alphabet_size.ndim != 2 or alphabet_size.shape[1] != 3:
+        raise ValueError("alphabet_size must have shape B or Bx3")
+    widths = alphabet_size.to(dtype) - 1.0
+    return torch.stack((widths[:, 0] / widths[:, 1],
+                        widths[:, 0] / widths[:, 2],
+                        widths[:, 1] / widths[:, 2]), dim=1)
+
+
 class RGBMixtureLogisticBounds(nn.Module):
     mix_num = 5
     no_multichannel_lmm = False
@@ -22,20 +34,24 @@ class RGBMixtureLogisticBounds(nn.Module):
             self.weights = weights.reshape(n, 3, self.mix_num, h, w)
         self.coeffs = torch.tanh(coeffs).reshape(n, 3, self.mix_num, h, w)
 
-    def _log_probs(self, input: torch.Tensor, alphabet_size: torch.Tensor) -> torch.Tensor:
+    def _log_probs(self, input: torch.Tensor, alphabet_size: torch.Tensor, scale_correction=False) -> torch.Tensor:
         n, _, h, w = input.shape
         if alphabet_size.ndim == 2:
             half = (1.0 / (alphabet_size.to(input.dtype) - 1.0)).reshape(n, 3, 1, 1, 1)
         else:
             half = (1.0 / (alphabet_size.to(input.dtype) - 1.0)).reshape(n, 1, 1, 1, 1)
         x = input.reshape(n, 3, 1, h, w).expand(-1, -1, self.mix_num, -1, -1)
+        coeffs = self.coeffs
+        if scale_correction:
+            ratios = cross_channel_scale_ratios(alphabet_size, coeffs.dtype)
+            coeffs = coeffs * ratios[:, :, None, None, None]
 
         m1 = self.mean[:, 0:1]
-        m2 = (self.mean[:, 1] + self.coeffs[:, 0] * x[:, 0]).unsqueeze(1)
+        m2 = (self.mean[:, 1] + coeffs[:, 0] * x[:, 0]).unsqueeze(1)
         m3 = (
             self.mean[:, 2]
-            + self.coeffs[:, 1] * x[:, 0]
-            + self.coeffs[:, 2] * x[:, 1]
+            + coeffs[:, 1] * x[:, 0]
+            + coeffs[:, 2] * x[:, 1]
         ).unsqueeze(1)
         mean = torch.cat((m1, m2, m3), dim=1)
         centered = x - mean
@@ -52,8 +68,8 @@ class RGBMixtureLogisticBounds(nn.Module):
         )
         return torch.log(delta.clamp_min(1e-9)) + self.log_prob_from_logits(self.weights)
 
-    def forward(self, input: torch.Tensor, alphabet_size: torch.Tensor) -> torch.Tensor:
-        return self.log_sum_exp(self._log_probs(input, alphabet_size))
+    def forward(self, input: torch.Tensor, alphabet_size: torch.Tensor, scale_correction=False) -> torch.Tensor:
+        return self.log_sum_exp(self._log_probs(input, alphabet_size, scale_correction))
 
     @staticmethod
     def log_prob_from_logits(x):
@@ -64,4 +80,4 @@ class RGBMixtureLogisticBounds(nn.Module):
         return torch.logsumexp(x, dim=2)
 
 
-__all__ = ["RGBMixtureLogisticBounds"]
+__all__ = ["RGBMixtureLogisticBounds", "cross_channel_scale_ratios"]

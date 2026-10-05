@@ -2,6 +2,8 @@ import os
 import time
 import argparse
 import shutil
+import hashlib
+import json
 from pathlib import Path
 
 import torch
@@ -47,8 +49,23 @@ def configure_optimizers(model, lr, aux_lr):
     return optimizer, aux_optimizer
 
 
+def parameter_hashes(model):
+    """Check initialization and optimizer updates without saving extra tensors."""
+    digests = {"main": hashlib.sha256(), "aux": hashlib.sha256()}
+    for name, parameter in sorted(model.named_parameters()):
+        digest = digests["aux" if name.endswith(".quantiles") else "main"]
+        digest.update(name.encode())
+        digest.update(parameter.detach().cpu().contiguous().numpy().tobytes())
+    return {key: digest.hexdigest() for key, digest in digests.items()}
+
+
 def train(args):
 
+    smoke_steps = getattr(args, "smoke_steps", 0)
+    if smoke_steps < 0:
+        raise ValueError("smoke_steps must be non-negative")
+    if smoke_steps and args.resume:
+        raise ValueError("Smoke tests must start in a fresh run; omit --resume")
     dist.init_distributed_mode(args)
     num_tasks = dist.get_world_size()
     global_rank = dist.get_rank()
@@ -118,6 +135,8 @@ def train(args):
         log_dir = os.path.join(args.resume, "logs")  # args.resume : run-xxxx
         ckpt_dir = os.path.join(args.resume, "checkpoints")
         ckp = torch.load(os.path.join(ckpt_dir, "model.pt"), map_location="cpu")
+        if ckp.get("smoke_test", False):
+            raise ValueError("A partial smoke-test checkpoint cannot resume a full training run")
 
         model_without_ddp.load_state_dict(ckp["model"])  # TODO
         start_epoch = ckp["epoch"] + 1
@@ -135,6 +154,8 @@ def train(args):
         train_step = 0
         best_bpp = float("inf")
         best_epoch = -1
+        if smoke_steps:
+            args.output_dir = os.path.join(args.output_dir, "smoke")
         args.output_dir = os.path.join(args.output_dir, "run-{}".format(time.strftime("%Y%m%d-%H%M%S")))
 
         if os.path.exists(args.output_dir):
@@ -156,9 +177,16 @@ def train(args):
         writer = None
     print("Experiment dir : {}".format(args.output_dir))
     print("Start training")
+    smoke_metrics = [] if smoke_steps else None
+    initial_hashes = parameter_hashes(model_without_ddp) if smoke_steps else None
+    if smoke_steps:
+        print(f"Smoke test: {smoke_steps} train batches and 1 validation batch; "
+              f"full training remains {args.num_epochs} epochs.", flush=True)
+        print(f"Initial parameter hashes: {initial_hashes}", flush=True)
+    end_epoch = start_epoch + 1 if smoke_steps else args.num_epochs
     try:
 
-        for epoch in range(start_epoch, args.num_epochs):
+        for epoch in range(start_epoch, end_epoch):
             if args.distributed:
                 train_dataloader.sampler.set_epoch(epoch)
 
@@ -171,9 +199,30 @@ def train(args):
                 writer,
                 train_step,
                 clip_grad=args.clip_grad,
+                max_batches=smoke_steps or None,
+                smoke_metrics=smoke_metrics,
             )
 
-            val_loss = eval_epoch(model, criterion, val_loader, epoch, writer)
+            val_loss = eval_epoch(model, criterion, val_loader, epoch, writer,
+                                  max_batches=1 if smoke_steps else None)
+
+            if smoke_steps:
+                final_hashes = parameter_hashes(model_without_ddp)
+                updated = {key: initial_hashes[key] != final_hashes[key] for key in initial_hashes}
+                if train_step != smoke_steps or not all(updated.values()):
+                    raise RuntimeError("Smoke test did not complete all requested steps and optimizer updates")
+                if global_rank == 0:
+                    summary = {
+                        "config": args.config, "num_epochs": args.num_epochs,
+                        "train_steps": train_step, "validation_batches": 1,
+                        "val_loss": val_loss, "batch_size": args.batch_size, "seed": args.seed,
+                        "feature_normalization": getattr(model_without_ddp, "feature_normalization", None),
+                        "cross_channel_scale_correction": getattr(model_without_ddp, "cross_channel_scale_correction", False),
+                        "initial_parameter_hashes": initial_hashes, "final_parameter_hashes": final_hashes,
+                        "parameters_updated": updated, "training": smoke_metrics,
+                    }
+                    with open(os.path.join(args.output_dir, "smoke_summary.json"), "w") as file:
+                        json.dump(summary, file, indent=2)
 
             if not args.multistep:
                 scheduler.step(val_loss)
@@ -199,6 +248,8 @@ def train(args):
                 "best_bpp": best_bpp,
                 "best_epoch": best_epoch,
             }
+            if smoke_steps:
+                checkpoint["smoke_test"] = True
             dist.save_on_master(checkpoint, os.path.join(ckpt_dir, "model.pt"))
 
             for checkpoint_epoch in getattr(args, "checkpoint_epochs", []):
@@ -213,18 +264,23 @@ def train(args):
                     shutil.copy2(os.path.join(ckpt_dir, "best_model.pt"), best_path)
                     print(f"Saved best model through epoch {checkpoint_epoch}: {best_path}")
 
-            print("Epoch: {}/ {}, loss:{:.4f}".format(epoch + 1, args.num_epochs, val_loss))
+            if smoke_steps:
+                print(f"Smoke test passed: {train_step} train steps, 1 validation batch, "
+                      f"val_loss={val_loss:.6f}; main and aux parameters updated.", flush=True)
+            else:
+                print("Epoch: {}/ {}, loss:{:.4f}".format(epoch + 1, args.num_epochs, val_loss))
 
             if writer is not None:
                 writer.add_scalar("lr", optimizer.param_groups[0]["lr"], epoch)
 
-        if epoch == args.num_epochs - 1:
+        if not smoke_steps and epoch == args.num_epochs - 1:
             print("Training stopped because reached maximum")
 
-        if writer is not None:
-            writer.close()
     except KeyboardInterrupt:
         print("Exiting from training early because of KeyboardInterrupt")
+    finally:
+        if writer is not None:
+            writer.close()
 
 
 def get_args_parser():
@@ -234,6 +290,8 @@ def get_args_parser():
     parser.add_argument("--resume", type=str, default="", help="Resume from checkpoint.")
     parser.add_argument("--mute", action="store_true", help="Whether to be mute.")
     parser.add_argument("--dist_on_itp", action="store_true")
+    parser.add_argument("--smoke_steps", type=int, default=0,
+                        help="Run this many train batches and one validation batch in a separate smoke directory; 0 disables.")
     return parser.parse_args()
 
 

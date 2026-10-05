@@ -3,6 +3,7 @@
 import torch
 import torch.nn.functional as F
 import torchac
+from model.distribution.rgb_lmm_bounds import cross_channel_scale_ratios
 
 from model.bit_depth import (
     lower_code_to_value,
@@ -13,13 +14,24 @@ from model.bit_depth import (
 )
 
 
-def _cdf_from_channel(model, params, alphabet_size, residual_crop, channel, max_width=256):
+PMF_FLOOR = 1.0 / 64800
+
+
+def _raw_pmf_from_channel(model, params, alphabet_size, residual_crop, channel, max_width=256):
+    """Native probability table after the floor, before normalization.
+
+    Candidates are residual integers in the model's original coordinates.
+    Keeping this stage separate permits support restrictions without applying
+    a second floor to an already normalized distribution.
+    """
     batch, _, count, _ = params.shape
     mix_num = model.distribution.mix_num
     mean, log_sigma, coeffs, weights = torch.split(params, 3 * mix_num, dim=1)
     mean = mean.reshape(batch, 3, mix_num, count).permute(0, 3, 1, 2)
     log_sigma = log_sigma.reshape(batch, 3, mix_num, count).permute(0, 3, 1, 2).clamp(min=-7.0)
     coeffs = torch.tanh(coeffs).reshape(batch, 3, mix_num, count).permute(0, 3, 1, 2)
+    if getattr(model, "cross_channel_scale_correction", False):
+        coeffs = coeffs * cross_channel_scale_ratios(alphabet_size, coeffs.dtype)[:, None, :, None]
     if model.distribution.no_multichannel_lmm:
         weights = weights.reshape(batch, 1, mix_num, count).expand(batch, 3, mix_num, count)
     else:
@@ -62,10 +74,21 @@ def _cdf_from_channel(model, params, alphabet_size, residual_crop, channel, max_
     )
     weight = torch.softmax(weights[:, :, channel], dim=2).unsqueeze(-1)
     pmf = (delta * weight).sum(dim=2)
-    floor = 1.0 / 64800
+    floor = PMF_FLOOR
     pmf = torch.where(valid, pmf.clamp_min(floor), torch.full_like(pmf, floor))
+    return pmf
+
+
+def _cdf_from_raw_pmf(pmf):
+    """Preserve the original FP32 normalization and CDF accumulation order."""
     pmf = pmf / pmf.sum(dim=2, keepdim=True).clamp_min(1e-12)
     return F.pad(torch.cumsum(pmf, dim=2).clamp(0.0, 1.0), (1, 0))
+
+
+def _cdf_from_channel(model, params, alphabet_size, residual_crop, channel, max_width=256):
+    return _cdf_from_raw_pmf(
+        _raw_pmf_from_channel(model, params, alphabet_size, residual_crop, channel, max_width)
+    )
 
 
 def _cdf_from_params(model, params, alphabet_size, residual_crop, max_width=256):
@@ -78,9 +101,10 @@ def compress_patches(model, x, seg, code_flag, patch_sz=64):
     x, seg = x.to(device), seg.to(device)
     code_flag = code_flag.to(device) if code_flag is not None else None
     x_norm, residual, bit_depth, lower_code, lower_value, alphabet_size = model.normalize_input(x, code_flag)
-    latent_code = model.seg_img_compressor.compress(x_norm + model.bound_condition(bit_depth, lower_code))
+    features = model.feature_input(x_norm, residual, lower_value, alphabet_size, code_flag)
+    latent_code = model.seg_img_compressor.compress(features + model.bound_condition(bit_depth, lower_code))
     prior_total = model.seg_img_compressor.decompress(**latent_code)["prior"]
-    context_total = model.sp_ctx(x_norm * 2.0)
+    context_total = model.sp_ctx(features * 2.0)
     coding_table = model.sp_ctx.get_coding_table(patch_sz).to(device)
     streams = []
     for step in range(int(coding_table.max().item())):
@@ -134,7 +158,9 @@ def decompress_patches(model, latent_code, streams, bit_depth, lower_code, seg, 
         denominator = (alphabet_size.to(torch.float32) - 1.0).view(batch, 1, 1, 1)
     for step in range(int(coding_table.max().item())):
         h_idx, w_idx = torch.nonzero(coding_table == step + 1, as_tuple=True)
-        context = model.sp_ctx((residual_tmp / denominator) * 2.0)[:, :, h_idx, w_idx].unsqueeze(3)
+        features = model.feature_input(residual_tmp / denominator, residual_tmp,
+                                       lower_value, alphabet_size, code_flag)
+        context = model.sp_ctx(features * 2.0)[:, :, h_idx, w_idx].unsqueeze(3)
         prior = prior_total[:, :, h_idx, w_idx].unsqueeze(3)
         residual_crop = residual_tmp[:, :, h_idx, w_idx].unsqueeze(3)
         seg_crop = seg[:, :, h_idx, w_idx].unsqueeze(3)
@@ -158,5 +184,6 @@ def decompress_patches(model, latent_code, streams, bit_depth, lower_code, seg, 
 
 __all__ = [
     "compress_patches", "decompress_patches", "_cdf_from_channel", "_cdf_from_params",
+    "_raw_pmf_from_channel", "_cdf_from_raw_pmf", "PMF_FLOOR",
     "pack_bit_depth", "pack_lower_bound", "unpack_lower_bound",
 ]
