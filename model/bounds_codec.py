@@ -113,7 +113,9 @@ def compress_patches(model, x, seg, code_flag, patch_sz=64):
         prior = prior_total[:, :, h_idx, w_idx].unsqueeze(3)
         residual_crop = residual[:, :, h_idx, w_idx].unsqueeze(3)
         seg_crop = seg[:, :, h_idx, w_idx].unsqueeze(3)
-        params = model.ep(model.fusion(torch.cat([prior, context], dim=1)), seg_crop)
+        params = model.entropy_parameters(
+            model.fusion(torch.cat([prior, context], dim=1)), seg_crop, lower_value, alphabet_size
+        )
         valid = code_flag[:, :, h_idx, w_idx].squeeze(1).bool() if code_flag is not None else None
         for channel in range(3):
             cdf = _cdf_from_channel(model, params, alphabet_size, residual_crop, channel)
@@ -164,7 +166,9 @@ def decompress_patches(model, latent_code, streams, bit_depth, lower_code, seg, 
         prior = prior_total[:, :, h_idx, w_idx].unsqueeze(3)
         residual_crop = residual_tmp[:, :, h_idx, w_idx].unsqueeze(3)
         seg_crop = seg[:, :, h_idx, w_idx].unsqueeze(3)
-        params = model.ep(model.fusion(torch.cat([prior, context], dim=1)), seg_crop)
+        params = model.entropy_parameters(
+            model.fusion(torch.cat([prior, context], dim=1)), seg_crop, lower_value, alphabet_size
+        )
         valid = code_flag[:, :, h_idx, w_idx].squeeze(1).bool() if code_flag is not None else None
         for channel in range(3):
             cdf = _cdf_from_channel(model, params, alphabet_size, residual_crop, channel)

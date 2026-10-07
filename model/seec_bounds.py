@@ -36,6 +36,10 @@ class SeecBoundsNet(SeecNet):
         """Feature coordinates; likelihoods always use normalize_input's x_norm."""
         return x_norm
 
+    def entropy_parameters(self, ctx, seg, lower_value, alphabet_size):
+        """Shared entry point for training, encoding, and decoding."""
+        return self.ep(ctx, seg)
+
     def forward(self, x, seg, valid_mask=None):
         x_norm, residual, bit_depth, lower_code, lower_value, alphabet_size = self.normalize_input(x, valid_mask)
         features = self.feature_input(x_norm, residual, lower_value, alphabet_size, valid_mask)
@@ -44,7 +48,7 @@ class SeecBoundsNet(SeecNet):
         x_scaled = x_norm * 2.0
         sp_ctx = self.sp_ctx(features * 2.0)
         ctx = self.fusion(torch.cat([prior_out["prior"], sp_ctx], dim=1))
-        ep_params = self.ep(ctx, seg)
+        ep_params = self.entropy_parameters(ctx, seg, lower_value, alphabet_size)
         x_dist = self.distribution(ep_params)
         if self.cross_channel_scale_correction:
             x_likelihoods = x_dist(x_scaled, alphabet_size, scale_correction=True)
@@ -73,6 +77,33 @@ class SeecBoundsNet(SeecNet):
 
     def get_bit_depth_num(self):
         return 1
+
+
+class SeecSharedBoundsEpNet(SeecBoundsNet):
+    """Shared pixel coordinates with numeric bounds directly conditioning ep."""
+
+    feature_normalization = "shared"
+    uses_entropy_bounds_condition = True
+
+    def __init__(self, *args, ep_context_channels=256, bounds_hidden_channels=64, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ep_bounds_mlp = nn.Sequential(
+            nn.Linear(2, bounds_hidden_channels),
+            nn.SiLU(),
+            nn.Linear(bounds_hidden_channels, ep_context_channels),
+        )
+        # Match the original entropy head at initialization. Earlier layers
+        # retain their random initialization so the branch can learn.
+        nn.init.zeros_(self.ep_bounds_mlp[-1].weight)
+        nn.init.zeros_(self.ep_bounds_mlp[-1].bias)
+
+    def entropy_parameters(self, ctx, seg, lower_value, alphabet_size):
+        if lower_value.ndim != 1 or alphabet_size.shape != lower_value.shape:
+            raise ValueError("shared ep bounds require one lower bound and alphabet per patch")
+        upper_value = lower_value + alphabet_size - 1
+        bounds = torch.stack((lower_value, upper_value), dim=1).to(ctx) / 255.0
+        condition = self.ep_bounds_mlp(bounds)[:, :, None, None]
+        return self.ep(ctx + condition, seg)
 
 
 class SeecChannelBoundsNet(SeecBoundsNet):
@@ -117,4 +148,4 @@ class SeecChannelBoundsNet(SeecBoundsNet):
         return 3
 
 
-__all__ = ["SeecBoundsNet", "SeecChannelBoundsNet"]
+__all__ = ["SeecBoundsNet", "SeecSharedBoundsEpNet", "SeecChannelBoundsNet"]

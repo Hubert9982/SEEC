@@ -168,7 +168,9 @@ def train(args):
             os.makedirs(ckpt_dir, exist_ok=True)
 
             if args.store:
-                misc.save_script_dir(args.output_dir, exclude_dirs=[os.path.dirname(args.output_dir), "data"])
+                exclude_dirs = [os.path.dirname(args.output_dir), "data"]
+                exclude_dirs.extend(getattr(args, "script_exclude_dirs", []))
+                misc.save_script_dir(args.output_dir, exclude_dirs=exclude_dirs)
 
     if global_rank == 0:
         writer = SummaryWriter(log_dir=log_dir)
@@ -178,7 +180,22 @@ def train(args):
     print("Experiment dir : {}".format(args.output_dir))
     print("Start training")
     smoke_metrics = [] if smoke_steps else None
-    initial_hashes = parameter_hashes(model_without_ddp) if smoke_steps else None
+    record_initial = getattr(args, "record_initial_parameters", False) and not args.resume
+    initial_hashes = parameter_hashes(model_without_ddp) if smoke_steps or record_initial else None
+    if record_initial and global_rank == 0:
+        scripts_dir = Path(args.output_dir) / "scripts"
+        source_hashes = {
+            str(path.relative_to(scripts_dir)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in scripts_dir.rglob("*.py")
+        }
+        with open(os.path.join(args.output_dir, "initialization.json"), "w") as file:
+            json.dump({
+                "model_class": type(model_without_ddp).__name__,
+                "arguments": misc.filter_args(args),
+                "checkpoint_epochs": args.checkpoint_epochs,
+                "initial_parameter_hashes": initial_hashes,
+                "source_sha256": source_hashes,
+            }, file, indent=2)
     if smoke_steps:
         print(f"Smoke test: {smoke_steps} train batches and 1 validation batch; "
               f"full training remains {args.num_epochs} epochs.", flush=True)
@@ -201,6 +218,7 @@ def train(args):
                 clip_grad=args.clip_grad,
                 max_batches=smoke_steps or None,
                 smoke_metrics=smoke_metrics,
+                diagnostic_dir=os.path.join(os.path.dirname(ckpt_dir), "diagnostics"),
             )
 
             val_loss = eval_epoch(model, criterion, val_loader, epoch, writer,
@@ -218,6 +236,7 @@ def train(args):
                         "val_loss": val_loss, "batch_size": args.batch_size, "seed": args.seed,
                         "feature_normalization": getattr(model_without_ddp, "feature_normalization", None),
                         "cross_channel_scale_correction": getattr(model_without_ddp, "cross_channel_scale_correction", False),
+                        "uses_entropy_bounds_condition": getattr(model_without_ddp, "uses_entropy_bounds_condition", False),
                         "initial_parameter_hashes": initial_hashes, "final_parameter_hashes": final_hashes,
                         "parameters_updated": updated, "training": smoke_metrics,
                     }

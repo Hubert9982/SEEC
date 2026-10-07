@@ -181,8 +181,10 @@ def encode_pair(model, image):
         h, w = torch.nonzero(table == step, as_tuple=True)
         crop = residual[:, :, h, w].unsqueeze(3)
         flag = valid[:, 0, h, w]
-        params = model.ep(model.fusion(torch.cat([prior[:, :, h, w], context[:, :, h, w]], dim=1).unsqueeze(3)),
-                          seg[:, :, h, w].unsqueeze(3))
+        params = model.entropy_parameters(
+            model.fusion(torch.cat([prior[:, :, h, w], context[:, :, h, w]], dim=1).unsqueeze(3)),
+            seg[:, :, h, w].unsqueeze(3), lower_value, alphabet
+        )
         synchronize(device)
         common_seconds += time.perf_counter() - start
         for channel in range(3):
@@ -268,8 +270,10 @@ def decode_packet(model, packet):
         h, w = torch.nonzero(table == step, as_tuple=True)
         context = model.sp_ctx((residual / denominator) * 2.0)[:, :, h, w]
         crop = residual[:, :, h, w].unsqueeze(3)
-        params = model.ep(model.fusion(torch.cat([prior[:, :, h, w], context], dim=1).unsqueeze(3)),
-                          seg[:, :, h, w].unsqueeze(3))
+        params = model.entropy_parameters(
+            model.fusion(torch.cat([prior[:, :, h, w], context], dim=1).unsqueeze(3)),
+            seg[:, :, h, w].unsqueeze(3), lower_value, alphabet
+        )
         flag = valid[:, 0, h, w]
         for channel in range(3):
             raw = _raw_pmf_from_channel(model, params, alphabet, crop, channel)
