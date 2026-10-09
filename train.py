@@ -72,6 +72,7 @@ def train(args):
 
     device = torch.device(args.device)
 
+    sampler_seed = args.seed
     args.seed = args.seed + global_rank
     misc.set_seed(args.seed)
 
@@ -90,7 +91,10 @@ def train(args):
     print("Global batch size: {}".format(global_batch_size))
     print("Learning rate: {}".format(args.lr))
 
-    sampler_train = data.DistributedSampler(args.train_dataset, num_replicas=num_tasks, rank=global_rank, shuffle=True)
+    sampler_train = data.DistributedSampler(
+        args.train_dataset, num_replicas=num_tasks, rank=global_rank,
+        shuffle=True, seed=sampler_seed,
+    )
 
     train_dataloader = data.DataLoader(
         args.train_dataset,
@@ -204,8 +208,8 @@ def train(args):
     try:
 
         for epoch in range(start_epoch, end_epoch):
-            if args.distributed:
-                train_dataloader.sampler.set_epoch(epoch)
+            # This sampler is used in single-process training as well as DDP.
+            train_dataloader.sampler.set_epoch(epoch)
 
             train_step = train_epoch(
                 model,
